@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>A網頁 MVP1017001</title>
+  <title>網頁MVP1017002</title>
   <link rel="preconnect" href="https://accounts.google.com"/>
   <style>
     :root{
@@ -333,6 +333,8 @@ let DOCS_OUT_FOLDER_ID = null;   // 作品下「製作/計畫書」資料夾 ID�
 const TASK_TEMPLATE_SHEET_NAME = '劇團計畫-任務模板';
 const TASK_TEMPLATE_JSON_NAME  = '劇團計畫-任務模板.json';
 
+// ★分段 Prompt 來源（改讀 Sheet）
+const SECTION_PROMPT_SHEET_NAME = '劇團計畫-分段Prompts';
 
 // === 舊作勾選與索引 ===
 const SELECTED_OLD_FILE_IDS = new Set(); // 使用者勾選的舊作 fileId
@@ -892,6 +894,77 @@ async function extractFromMinutes(raw){
   }
 }
 
+// ======= 從 Google Sheet 讀各分段的 System / Prompt（CSV 匯出）=======
+const PROMPT_CACHE = {}; // key -> { system, prompt, temperature }
+
+function tReplaceBase(s = '', ctx = {}) {
+  // 基本變數替換
+  return (s || '')
+    .replaceAll('{{jsonCtx}}', JSON.stringify(ctx, null, 2))
+    .replaceAll('{{minutes}}', (ctx.minutes || '').slice(0, 2000));
+}
+function applySuggestionBlocks(s = '', suggestion = '') {
+  // 讓 {{#suggestion}}...{{/suggestion}} 只有在有建議時出現
+  if (!suggestion) {
+    return s.replace(/{{#suggestion}}[\s\S]*?{{\/suggestion}}/g, '').replaceAll('{{suggestion}}','');
+  }
+  return s.replaceAll('{{#suggestion}}', '').replaceAll('{{/suggestion}}', '').replaceAll('{{suggestion}}', suggestion);
+}
+
+async function loadSectionPromptsFromSheet() {
+  if (Object.keys(PROMPT_CACHE).length) return PROMPT_CACHE; // 已載過
+  const f = await findFileByExactName(SECTION_PROMPT_SHEET_NAME);
+  if (!f || f.mimeType !== 'application/vnd.google-apps.spreadsheet') {
+    log(`找不到 Sheet「${SECTION_PROMPT_SHEET_NAME}」，將使用函式內建的預設提示詞。`, 'warn');
+    return PROMPT_CACHE; // 空表示沒載到
+  }
+  const res = await gfetch(`${GDRIVE_FILES}/${f.id}/export?mimeType=text/csv&supportsAllDrives=true`);
+  const csv = await res.text();
+  const rows = parseCSV(csv);
+  if (!rows.length) return PROMPT_CACHE;
+
+  const headers = rows[0].map(h => (h || '').trim().toLowerCase());
+  const idx = n => headers.findIndex(h => h === n);
+
+  const ikey = idx('key');
+  const isys = idx('system');
+  const ipmt = idx('prompt');
+  const itmp = idx('temperature');
+
+  rows.slice(1).forEach(r => {
+    const key = (r[ikey] || '').trim();
+    if (!key) return;
+    PROMPT_CACHE[key] = {
+      system: (r[isys] || '').trim(),
+      prompt: (r[ipmt] || '').trim(),
+      temperature: parseFloat((r[itmp] || '').trim()) || 0.35
+    };
+  });
+  log(`已載入分段 Prompts（${Object.keys(PROMPT_CACHE).length} 筆）。`);
+  return PROMPT_CACHE;
+}
+
+async function getSectionPrompt(secKey, ctx, opts = {}) {
+  await loadSectionPromptsFromSheet(); // 嘗試載入（快取保護）
+  const rec = PROMPT_CACHE[secKey] || {};
+
+  // 預設 system / prompt（若 Sheet 沒給）
+  let sys = rec.system || '你是中文計畫書編輯，輸出繁體中文，避免虛構，語氣精準。';
+  let pmt = rec.prompt || `請根據以下資訊撰寫段落（${secKey}）。已知欄位：{{jsonCtx}}。會議重點：{{minutes}}
+{{#suggestion}}【修改建議】\n{{suggestion}}{{/suggestion}}`;
+
+  // 變數替換
+  pmt = tReplaceBase(pmt, ctx);
+  pmt = applySuggestionBlocks(pmt, (opts?.suggestion || ''));
+
+  return {
+    sys,
+    prompt: pmt,
+    temperature: rec.temperature || 0.35
+  };
+}
+
+
 // ======= 產生各段內容的提示詞 =======
 function buildCommonContext(){
   const year = document.getElementById('workYear').value.trim();
@@ -906,215 +979,73 @@ function buildCommonContext(){
 
 
 
-async function gen_originGoals(opts={}){
+async function gen_originGoals(opts = {}) {
   const ctx = buildCommonContext();
-  const sys = `你是嚴謹的劇團計畫書寫手，輸出繁體中文，語氣正式扼要。`;
-  const ask = `
-請參考以下幾個模板的文字風格、格式與字數（不要參考樣板內容，內容以劇本與會議記錄與其他參考資料為主），不列點生成「計畫緣起與目標」，字數一定要達600字，可以多去討論這個作品與台灣的關係：
-模板一：棒球在這數十年間都作為台灣國球，其背後卻隱含著複雜的殖民史和地緣政治的背景。棒球於19世紀初，因為日本明治維新大量對外國的開放，隨著西方的經貿往來、文化輸出而傳入日本。而隨著日本在亞洲擴張的野心，棒球也隨著殖民主義傳入台灣，隨著紅葉棒球和嘉農棒球隊擊敗日本球隊的事件，棒球開始成為台灣用來證明自己的方式。這樣的脈絡甚至延續到了國民政府來台，在中華民國與美國斷交後，台灣人民又再度尋求以棒球，透過擊敗美國的少棒隊來建構自己的認同，這樣的意識形態甚至延伸到了渴望王建民在美國職棒大聯盟的成功。
-這樣的現象不僅僅反映在了國際賽事的勝負，甚至根深柢固的在文化上受到美、日兩國意識形態的影響，而語言也是最直接反應的現象。台語在日本殖民時期大量的受到日本文化影響，夾雜了許多的日文字詞，這樣的現象也在棒球的術語中可以看到大量的例子，包含安打(Hitto)、紅不讓(Homerun)等等我們耳熟能詳的字詞都是從日本傳進來，進而演變成本土台灣選手在球場上的詞彙。而在二戰過後冷戰時期，台灣與美國共屬同一個陣營的情況之下，美國變成了另外一個台灣人所嚮往的地方，而英語也成為了台灣人所嚮往的語言之一，加上國民政府對於本土語言的打壓，台語慢慢的從生活語言慢慢消失。在這一段漫漫長路的身份與認同的追尋當中，台灣人的身份也慢慢的模糊。
-《洋基之子》這齣戲以語言和身份作為主題，書寫一名七零年底在美軍駐台時期，一個美國軍人與台灣女子生下的小孩麥可。故事圍繞麥可的身份認同之旅展開，他在童年時因父母衝突失去了家庭溫暖，隨母親返回台灣後，因混血身份遭受村莊和學校的排斥。成年後，他為尋求屬於自己的歸屬，踏上尋母和追尋棒球夢的旅程。他到日本效仿偶像伊良部秀輝，希望透過棒球成為社會的一部分，但失敗後輾轉到美國，期望憑藉與父親的連結獲得認同。
-在這個演出中，麥可受到母親影響，母語是台語，但在成長與教育的過程中，不斷接觸到不同的語言，包含父親說的英語、學校使用的華語，或是在棒球隊所需要用的日語，這些混雜之下凸顯了台灣在不同文化的交雜中我們集體的渴望的方向與淺意識。
-我們計畫於2025年12月進行兩場《相信世代》演出，預計邀請約100名觀眾參與，並透過這次演出讓觀眾深入思考語言、文化和身份認同的議題。隨後，於2026年5月，我們將在國家戲劇院實驗劇場進行四場正式演出，預計參與觀眾800名。期待可以藉由這個創作的，重新審視我們習以為常的語言和運動賽事背後的權力架構與角力，並打開未來巡演的機會，在未來持續的在不同的場館演出。
-模板二：從2019年開始，王珩開啟了以「每個人的身體都藏有故事」的概念開啟了「身體記事創作計畫」，期間發展了以素人女性為主題的《我們在此出發》、《跳針》以及《四季》三部曲，並且與聾人表演者合作，於2022年創作《在安靜中跳舞》。而在經過四年的身體記事計畫後，王珩決定在三十歲從自己的身體出發，挖掘自己的身體故事。
-　　王珩從小生長在高雄，因為母親的要求開始學習舞蹈，從小學接觸踢踏舞，短暫進入劇校學習傳統的武功，並且後來又學習芭蕾、現代舞進入舞蹈班。回顧這些學習的歷程，背後的原因滿滿是母親的未盡之事，例如母親將自己當明星的夢想寄託在王珩身上，或是期望自己女兒能夠成為中國傳統文化的代言人，以及希望自己的家庭能夠符合90年代台灣中產階級的想像等等。這些未盡之事背後都隱含著不同時期台灣的共同價值與敘事，和個人的無奈。
-　　然而這些期待並沒有依著母親期望的方向走，舞蹈反倒成為王珩離開家裡、離開高雄的理由，並以此開始追尋自己的舞蹈生涯。這時代的變遷之中，新一代的人產生了自己的敘事，而上一輩過去所相信的敘事也隨之被拋下了。我們發現這樣的情形在台灣這塊土地上是屢見不鮮的，台灣自60年代開始經歷快速發展，社會變遷越來越快，上一輩的人與我們這一輩在不同生命經驗之下產生不同的價值產生出許多的衝突。然而快速轉變的這些無奈之中，往往讓許多人感到錯亂、無法掌握，因此產生經驗與現實之間有著巨大落差的感受。
-　　因此開啟了《打人的狗》做計劃，以王珩的家鄉高雄的舊名: 打狗為題，以翻轉的方式呈現不同時代敘事的錯亂，並用王珩自己的舞蹈經驗訴說母親與自己之間的故事，梳理舞蹈與母親所經驗過的不同時代的關係。我們希望能夠用這個作品以及自己身體故事與上一輩和解，同時與同輩的人創造對話的空間。並且也讓下一輩的人感受台灣人們在這段時間經歷的複雜環境，以及我們如何成為現在的樣子，讓這個作品可以成為一個彼此理解的可能。
-　　2023年11月預計以45分鐘版於樹林藝文中心呈現《在樹林打人的狗》，內容關注於王珩學習跳舞的故事。2024年五月預計於高雄演出版本，將會以全長60分鐘版本呈現「身體記事創作計畫《打人的狗》」正式演出，加入更多母親與王珩的互動，呈現家庭故事、在地歷史和個人經驗的交互敘事。
-模板三：複象公場長期以來都以不同面向的社會族群、事件或是歷史作為創作素材，並且嘗試以更多元的視角進入劇場的創作視野的可能。過去和聾人族群相處時，發現聾人族群大多數觀賞表演藝術的經驗都非常有限，其中主要原因為現場表演大多數都缺少可以讓他們理解的方法。近十年仍然有許多團隊努力在發展讓聾人可以進入表演藝術，然而有許多的演出仍然僅僅是讓聾人「證明」他們有和聽人一樣的能力，而往往忽視了聾人在獨特的語境文化之下，以及與聽人文化的長期摩擦與交融所產生的獨特景觀。因此我們2020年開始，開啟了以聾人和聽障族群為主體的創作計畫，創作了以純聽障、聾人族群為主體，討論聽障、聾人族群生命經驗的《在安靜中跳舞》以及以聽、聾人對話，討論語言和身體共感的《Feel Together》。
-而從2023年開始，我們開始重新思考我們除了創作專門給聾人看的演出之外，有沒有什麼樣的形式可以更好的展現聽、聾在同樣的故事中共同的存在，並且同時展現出不同的觀點？有沒有可能藉由這樣的形式更延伸「共融」的美學？因此開始了《聽見你的聲音》手、口語雙語劇本創作計畫。
-在這個計畫中，我們將主角設定為兩名，一名是聾人的手語使用人士高中生「大樹」，以第一視角為觀點說他努力想要成為作家的故事。另一名是完全不會手語的年輕聽人作家「逸翔」。兩人因為文學而交會，卻因為語言而分隔。我們同時交融這兩位主角的視角，訴說一場在青少年的心裡關於「友誼」、「愛情」和「自我定位」的困境，期待可以創造一個劇場演出，藉由這個作品讓聽聾人都能夠不用藉用任何翻譯，直接感受角色的情感和困惑，並且在同一個故事裡同時存在兩個觀點，讓聽人、聾人能夠在同一個劇場裡看同一個故事。藉此以「語言」的異同隱喻我們之間的異同，是來自於語言的不通？還是來自於對於自我和他人的不理解？並由此想像更多理解的可能。
-
-再次確認，不要有抄任何樣板的內容，只取文字風格，內容與主題請從劇本或是會議記錄看到的為主，不要聚焦在上面樣板中的身份與歷史問屜，要根據劇本或會議記錄的內容去發想劇本裡本身可能內含的主題。
-
-已知欄位：${JSON.stringify(ctx,null,2)}
-可引用之會議記錄：${ctx.minutes?.slice(0,2000)||''}
-${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
-`.trim();
-
-  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.35});
+  const { sys, prompt, temperature } = await getSectionPrompt('originGoals', ctx, opts);
+  return await openaiChat(
+    [{ role: 'system', content: sys }, { role: 'user', content: prompt }],
+    { temperature }
+  );
 }
 
-async function gen_workDescription(opts={}){
+
+async function gen_workDescription(opts = {}) {
   const ctx = buildCommonContext();
-  const sys = `你是劇場企劃，輸出繁體中文；避免虛構細節。`;
-  const ask = `
-請參考以下文字風格、格式與字數（不要參考內容，內容以劇本與會議記錄與其他參考資料為主），不列點生成「作品介紹」與「執行方式」（含A、演出形式；B、演出特色），總字數一定要達2000字以上：
-（1）作品介紹
-
-《洋基之子》故事開始於麥可住在美國的童年，美國人父親與台灣人母親從麥可小時候關係就持續的惡化。父親的暴躁與母親的淚水成為他童年的主要記憶。麥可在父母分開後，被母親帶回台灣，寄住在母親的父母家。他在台灣生活，因為膚色與血統而遭受排擠與歧視。
-隨著成長，麥可對棒球的熱愛成為他唯一的出口，但也在社會與種族壓力下逐漸失去方向。他受到日籍投手伊良部秀輝的啟發，努力模仿他的風格，希望透過棒球證明自己。然而，因為膚色和血統問題，他無法成為台灣的國手。他最終發現母親已在日本另組家庭並隱瞞他的存在，對此感到深深的背叛。
-在尋找認同的過程中，他學習日語並前往日本，試圖與母親重逢。但當他終於見到母親時，卻遭到冷漠拒絕，陷入孤獨與失落。他最終選擇前往美國尋找父親的蹤跡，期望藉此完成身份認同之旅。然而，他到達美國後才發現父親已去世，連依親移民的機會也失去了。他寄希望於以愛情建立新生活，但再次因文化與身份問題而失敗。
-最後麥可陷入對自身價值的質疑，他的童年偶像伊良部秀輝在棒球場上的失敗，成為他人生困境的隱喻。麥可試圖在異鄉重建生活，透過回憶與現實的交織，探索「家」與「愛」的真正意義。
-
-劇本節錄：
-
-麥可：阿嬤一樣，什麼都沒說。但在那一天晚上，阿嬤幫我打包行李。我的東西不多，只有幾件衣服，還有一頂洋基隊的帽子，阿嬤問我帽子要不要丟了，我跟她說，我想要帶著。
-女聲：（唱〈雨夜花〉日文版。）
-雨の降る　夜に　咲いてる　花は
-風に　吹かれて　ほろほろ　落ちる
-麥可：阿嬤也唱了這首歌，但我從來不知道那是什麼語言。如果那是愛的語言，為什麼Mommy唱完之後，就把我丟下？如果這是愛的語言，為什麼阿嬤唱完，就把我送到球隊？
-
-
-（2）執行方式
-我們這次「《洋基之子》台文故事劇場演出計畫」的演出將會以台語作為主要的語言，搭配華語、日語與英語不同語言的混雜來呈現台灣複雜的認同問題。演出的劇本內容將會有一個主要角色，麥可，以及兩位敘述者，三個人共同帶領觀眾從1980年代，隨著麥可從美國回來台灣，並且長大開始加入棒球隊，再到他學日文並且到日本尋找母親，以及到最後來到父親的家鄉紐約。
-在這些過程中，觀眾透過演員在語言和簡單的肢體，扮演不同的情境中的角色，在快速切換中完成不同場景的想像，並且進入到麥可內心的掙扎。
-
-A.演出形式
-
-以台語為主的多語敘事台灣編年史
-在《洋基之子》，台語不只是一種語言，更是與自我文化認同緊緊綁在一起的，在這個作品，我們將會以主角麥可的一生，貫穿台灣從八零年代到兩千年代的歷史，並且藉由他與在戰後在台美國軍人的父親、台灣母親以及經歷日治時期的外公外婆的互動，穿越台灣多重殖民的經驗，展現出麥可成長環境的多語性，展現出了台灣複數文化並存的景象。這樣的創作希望能打破以華文文中心的歷史敘事方式，而展現小人物生命經驗中多語敘事的文化景觀。
-
-角色的多重扮演與敘事
-《洋基之子》故事中，主角麥可從小被父母親拋棄，從小學開始加入棒球隊，以及長大後開啟到日本、美國追尋自己的旅程。而這整個故事將會以三名演員進行呈現，其中兩名表演者分別扮演所有麥可在人生路上所遇到的角色，同時也敘事麥可在這些經歷中的故事。而一名表演者則扮演麥可，以聲音和肢體表的不同呈現，展現麥可的不同階段，以及心中的獨白，讓觀眾好像置身於麥可的心裡空間之中。
-
-空間與敘事的共同想像
-《洋基之子》的故事1970年代末期的台灣開始，穿越了1980的台灣鄉村、90年代的日本，並且最後到了紐約。在多元場景交錯的呈現下，我們將會使用極簡的空間設置呈現不同的場景，搭配演員的敘事，以及物件、光影和舞台空間的使用，創造出故事中不同場景，包含學校、棒球場、紐約街道等等。讓觀眾藉由劇場所創造出來的故事空間，以想像進入到敘事之中。
-
-麥可腦內的雜音與大量聲景的堆疊創造複數聲景
-在聲音設計上，《洋基之子》將會使用大量的聲景(soundscape)搭配空間質地的轉換來創造故事中不同的場景。也在不同時代、空間聲景的聲景中，加入低鳴的混音創造出麥可腦中不同記憶片段的混雜意象，創造複數時空在劇場同時進行的效果。並且將麥可所遭遇不同的角色，使用音響系統做不同的聲音質地變化，並透過大量的音效來創造不同場景的想像。
-
-B.演出特色
- 語言作為故事中重要主題
-《洋基之子》以語言的多樣性作為核心，讓語言不僅是交流工具，更是一種行動形式，蘊含隱性的權力結構與暴力。本劇透過主人公麥可的經歷，展示語言如何在不同文化中象徵認同、權威與排擠。例如，母親在離開麥可前，以《雨夜花》這首歌來作為道別，在麥可的印象中台語成為了一種離別的語言，而《雨夜花》在麥可的外婆以日文唱這首歌安撫麥可，讓他對於日文的語言產生了一種愛的氛為。同時，劇中融合了台語、英語、日語及國語，刻畫麥可如何在多元語言環境中掙扎與適應，展現台灣在文化交織中的集體心理。語言的選擇與使用，既是麥可行動的手段，也是他面對身份認同衝突的戰場，象徵著社會對混血兒身份的異化與壓迫。
- 棒球牽起不同年代觀眾的記憶，反思自我身份認同
-棒球作為劇中重要的象徵，串聯起台灣不同時代觀眾的共同記憶，承載深厚的情感與歷史意涵。劇情中的棒球情節既喚起人們對過去國球榮耀的回憶，也揭示了運動背後的複雜文化脈絡。棒球不僅是麥可的夢想，也是他試圖證明自己價值與尋找歸屬的象徵。從麥可模仿日籍偶像伊良部秀輝、去日本學日文想要尋求更好的訓練，再到他前往美國尋求身份認同，棒球承載了麥可的希望與失落，反映台灣在日、美文化影響下的自我定位與掙扎。觀眾在這個過程中，既能感受到個人與集體記憶的共鳴，也能思考自己對身份與文化的認知。
-以「空的空間」建構觀眾想像
-演出特別採用簡約的舞台設計，以「空的空間」作為空間的形式，刺激觀眾的主動想像，營造一種開放的敘事氛圍。劇中的場景透過演員的語言與動作快速切換，僅依賴少量道具與燈光變化，將觀眾的注意力集中在角色內心的掙扎與情感轉折上。例如，麥可回憶童年的家庭後院場景、母親的哭聲與父親的棒球名言等等，全憑空間的留白讓觀眾自行填補情境，進一步代入劇情的情感張力。「空的空間」不僅降低物理場景的具象化，還提供更多層次的詮釋可能性，讓觀眾在每個場景中探索故事背後更深層的意涵與寓意。
-
-
-已知欄位：${JSON.stringify(ctx,null,2)}
-會議記錄重點：${ctx.minutes?.slice(0,2000)||''}
-${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
-`.trim();
-  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.35});
+  const { sys, prompt, temperature } = await getSectionPrompt('workDescription', ctx, opts);
+  return await openaiChat(
+    [{ role: 'system', content: sys }, { role: 'user', content: prompt }],
+    { temperature }
+  );
 }
 
-async function gen_team(opts={}){
-  const ctx = buildCommonContext();
-  const sys = `你是製作企劃，輸出繁體中文。若資料不足，保留表格並以「待補」或記錄中的可能人選（加註可能）填入。表格用 Markdown。`;
-  const ask = `
-請生成「創作與製作團隊」：
-- 主要人員名單與職稱（表格：姓名｜職務｜簡介 50–80 字｜代表作）
-- 顧問與合作單位（若有）
-請從會議記錄提取或推測可能人選並標註（可能），不足者以「待補」。
 
-已知欄位：${JSON.stringify(ctx,null,2)}
-會議記錄：${ctx.minutes?.slice(0,2000)||''}
-${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
-`.trim();
-  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.3});
+async function gen_team(opts = {}) {
+  const ctx = buildCommonContext();
+  const { sys, prompt, temperature } = await getSectionPrompt('team', ctx, opts);
+  return await openaiChat(
+    [{ role: 'system', content: sys }, { role: 'user', content: prompt }],
+    { temperature }
+  );
 }
 
-async function gen_schedule(opts={}){
-  const ctx = buildCommonContext();
-  const sys = `你是劇團計劃書寫手，輸出繁體中文`;
-  const ask = `
-請參考以下文字風格、格式與字數（不要參考內容，內容以劇本與會議記錄與其他參考資料為主），不列點生成「計畫期程」，如果沒有跨年度，不用以第一年第二年列點寫：
-第一年：文本發展與讀劇呈現
-第一年的主要目標是完成文本創作、台語翻譯與初步排練，確保劇本的台語版本準確呈現角色與故事情感。同時透過讀劇工作坊，幫助演員熟悉台語語調與發音，訓練語言表現力。音樂設計與視覺概念初步加入，確保故事的整體氛圍一致性。年底透過兩場讀劇演出進行實際測試，蒐集觀眾與專業回饋，為文本進一步修正與正式製作提供方向，奠定第二年完整演出的基礎。
-五月至六月：文本創作與發展
-這段時間主要是編劇針對故事核心跟結構進行創作，把角色的背景和情感慢慢鋪陳出來，還會加入台語跟多語言元素的設計，讓故事更有層次。這是整個計畫的基礎階段，為後續的翻譯和排練鋪路。
-七月至十月：台語文本翻譯與改寫
-編劇、導演會和台語指導楊書楷一起，把初稿翻成台語版本，過程中還會調整台詞讓它更符合台語使用的自然感，增加多語言間的衝突感跟戲劇效果，讓文本更有張力。
-七月至十月：讀劇工作坊
-演員們會參加讀劇工作坊，特別針對台語的口氣和發音來訓練。透過這樣的反覆練習，不只讓演員更熟悉台詞，還能讓他們的角色詮釋更貼近劇本需要的感覺。
-十一月：讀劇排練與視覺概念
-開始正式的讀劇排練，這時候音樂設計也會加入，讓整體氛圍更完整。導演會帶領團隊討論視覺呈現，包含舞台的燈光、道具的搭配，為未來正式演出定下風格基調。
-十二月：讀劇演出與檢討
-12月20日和21日會各有一場讀劇演出，觀眾跟專家都會來看，演出結束後還會開檢討會，把回饋整理起來，作為改進的依據。另外，這時候空間設計的初稿也會完成，為第二年的正式演出奠定基礎。
-第二年：正式演出
-第二年的目標是以第一年的成果為基礎，完成正式排練與宣傳，以及空間設計、燈光、音樂等製作細節全面定稿。最終於五月在兩廳院實驗劇場舉行四場正式演出。
-一月：空間設計與宣傳規劃
-空間設計會在這個月確定下來，導演跟設計團隊也會進行最後的細節確認。宣傳部分也會同步啟動，拍攝宣傳照來做視覺素材，增加觀眾對演出的期待感。
-二月：排練與宣傳啟動
-這個月演員會正式開始排練，導演也會全程帶領大家進一步打磨表演細節。宣傳活動全面展開，像是社群媒體推廣跟票務資訊發布，讓更多人知道這齣戲。
-三月至四月：排練與設計定稿
-這段時間會進行更密集的排練，燈光、音效、服裝等設計也會完成最後定稿。所有部門密切合作，確保每個細節都到位，為演出做好萬全準備。
-五月：整排與正式演出
-正式演出前會安排三次完整的整排，確認所有表演、燈光、音樂和舞台設計的配合度。5月8日至10日將在兩廳院實驗劇場舉行四場演出，為這次計畫畫下圓滿的句點。
 
-已知欄位：${JSON.stringify(ctx,null,2)}
-會議記錄：${ctx.minutes?.slice(0,2000)||''}
-${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
-`.trim();
-  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.3});
+async function gen_schedule(opts = {}) {
+  const ctx = buildCommonContext();
+  const { sys, prompt, temperature } = await getSectionPrompt('schedule', ctx, opts);
+  return await openaiChat(
+    [{ role: 'system', content: sys }, { role: 'user', content: prompt }],
+    { temperature }
+  );
 }
 
-async function gen_tech(opts={}){
+async function gen_tech(opts = {}) {
   const ctx = buildCommonContext();
-  const sys = `你是技術統籌。輸出繁體中文，條列＋表格混合皆可；未定案之項目列「可行方案＋成本帶（粗估）」；沒有就省略。`;
-  const ask = `
-請生成「技術需求與舞台配置」：
-- 舞台與座位（鏡框／黑盒；觀眾數；可變配置）
-- 燈光／音響／投影／特別需求（如多語字幕、台語發音比例）
-- 無障礙與共融設計（輪椅席、導聆、字幕、口述影像等—若尚未定案，列出可行方案＋成本帶；無則免）
-
-已知欄位：${JSON.stringify(ctx,null,2)}
-會議記錄：${ctx.minutes?.slice(0,2000)||''}
-${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
-`.trim();
-  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.3});
+  const { sys, prompt, temperature } = await getSectionPrompt('tech', ctx, opts);
+  return await openaiChat(
+    [{ role: 'system', content: sys }, { role: 'user', content: prompt }],
+    { temperature }
+  );
 }
 
-async function gen_marketing(opts={}){
+
+async function gen_marketing(opts = {}) {
   const ctx = buildCommonContext();
-  const sys = `你是行銷企劃。輸出繁體中文。`;
-  const ask = `
-請參考以下文字風格、格式與字數（不要參考內容，內容以劇本與會議記錄與其他參考資料為主），列出以下五點生成「行銷與票務策略」，每點至少150字：
-建立故事與品牌認同
-目標： 讓觀眾對《洋基之子》這個作品產生強烈的情感連結，了解背後的歷史與文化背景。
-創意圖文： 利用具視覺鮮明的宣傳海報，呈現多語言、跨文化的核心價值，配合對應角色的情感宣言與故事縮影，讓觀眾提前感知作品的多元層面。
-網站與社交媒體平台： 設立專屬網站或專頁，定期發布劇組製作進度、故事背景介紹以及幕後花絮，並設計有趣的互動活動，增加與觀眾的互動。
-
-建立社群媒體宣傳
-目標： 借助社群媒體的平台力量，提高曝光率並加強觀眾的參與感。
-多平台推廣： 在Instagram、Facebook等平台上，開設專屬帳號或標籤（如#洋基之子 #尋找自我 #多語台灣），定期發布演出資訊、人物介紹、語言與棒球的相關小故事或互動內容。
-影片花絮： 利用製作過程中的幕後花絮或演員練習的片段，展現劇本的多層面性及演員的投入，吸引更多觀眾關注。
-藝文網紅與podcast合作： 邀請文化、戲劇和台灣歷史背景相關領域的劇評或專業人士進行宣傳。這些影響者可以分享他們對作品的看法，並將其與自己的觀眾群體分享。
-
-合作與跨界行銷
-目標： 透過跨界合作引起更多人群的關注，擴大宣傳範圍。
-文化合作： 與台灣文化機構、語言學會或體育組織合作，推出聯名活動或折扣票價等促銷活動。例如，可以與台灣棒球協會合作，將棒球與文化結合，吸引更多棒球迷參與演出。
-學校與社區合作： 透過與學校或社區合作，將《洋基之子》的文化議題帶進教育與討論，設計特別場次或優惠票價，吸引學生與年輕觀眾群。
-
-提前開放票務與促銷
-目標： 提早吸引觀眾購票，藉由特殊票價及限量福利增加觀眾的購票意願。
-早鳥票與團體票： 提供早鳥票優惠，或者對於學生、文化工作者、棒球迷等群體推出特別票價。團體票可以與學校或機構合作，吸引更多人提前訂票。
-限量紀念商品： 提供以劇作為靈感的限量紀念商品，如印有劇中台語、日語或棒球元素的應援小周邊（如手環、加油棒、吊飾）等，作為觀眾的回饋，並加強品牌的識別度。
-
-線上與線下活動
-   目標： 透過多種形式的活動增加觀眾參與感，進一步擴大影響力。
-線上座談會或讀劇分享： 在演出前舉辦座談會，邀請編劇、導演及演員與觀眾對話，探討劇中涉及的文化議題、語言設計及身份認同等問題，進一步引發觀眾對劇情的思考與討論。
-現場互動活動： 在演出期間安排現場互動，如小型的棒球挑戰賽或語言遊戲，讓觀眾更深刻地體驗劇情中的文化衝突與認同掙扎。
-
-
-
-已知欄位：${JSON.stringify(ctx,null,2)}
-會議記錄：${ctx.minutes?.slice(0,2000)||''}
-${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
-`.trim();
-  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.35});
+  const { sys, prompt, temperature } = await getSectionPrompt('marketing', ctx, opts);
+  return await openaiChat(
+    [{ role: 'system', content: sys }, { role: 'user', content: prompt }],
+    { temperature }
+  );
 }
 
-async function gen_budget(opts={}){
+async function gen_budget(opts = {}) {
   const ctx = buildCommonContext();
-  const sys = `你是製作會計。輸出繁體中文，表格用 Markdown：項目｜細目｜單價×數量｜小計｜備註；若會議記錄有總預算或單項預算請代入，其餘標「待補」。`;
-  const ask = `
-請生成「預算與資源配置（試算表）」：
-- 人事（導演、演員、設計、舞監、製作、行政）
-- 場地與技術（場租、燈音投、運輸保險）
-- 視覺影像／宣傳（攝影、設計、廣告）
-- 行政雜支（合約、審計、雜支）
-- 預備金（5–10%）
-若有多場地／多檔期，請標註差異。
-
-已知欄位：${JSON.stringify(ctx,null,2)}
-會議記錄：${ctx.minutes?.slice(0,2200)||''}
-${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
-`.trim();
-  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.3});
+  const { sys, prompt, temperature } = await getSectionPrompt('budget', ctx, opts);
+  return await openaiChat(
+    [{ role: 'system', content: sys }, { role: 'user', content: prompt }],
+    { temperature }
+  );
 }
+
 
 // ======= Drive 基本操作 =======
 async function gfetch(url, opts={}){
