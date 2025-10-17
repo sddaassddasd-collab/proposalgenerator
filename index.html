@@ -118,13 +118,13 @@
       <div class="stack">
         <div>
           <label>OpenAI API Key（只存在此頁記憶，不上傳）</label>
-          <input id="openaiKey" type="text" placeholder="sk-..." />
+          <input id="openaiKey" type="password" placeholder="sk-..." />
           <div class="row"><span class="mini">建議先不要存 localStorage，頁面刷新即清空。</span></div>
         </div>
         <div class="grid2">
           <div>
             <label>Google OAuth Client ID（Web）</label>
-            <input id="googleClientId" type="text" placeholder="xxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com" />
+            <input id="googleClientId" type="password" placeholder="xxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com" />
           </div>
           <div>
             <label>授權狀態</label>
@@ -135,6 +135,13 @@
           <button class="btn" id="btnGoogleAuth">Google 登入授權</button>
           <button class="btn secondary" id="btnLogout">登出</button>
         </div>
+        <!-- 本機儲存控制 -->
+<div class="row">
+  <button class="btn secondary" id="btnSaveLocal">儲存到本機</button>
+  <button class="btn danger" id="btnClearLocal">清除本機憑證</button>
+  <span class="mini">（儲存在此裝置的瀏覽器 localStorage）</span>
+</div>
+
       </div>
 
       <h2>② 會議記錄</h2>
@@ -1429,6 +1436,13 @@ function filterOldList(){
 document.addEventListener('DOMContentLoaded', ()=>{
   const s = document.getElementById('oldSearch');
   if(s) s.addEventListener('input', filterOldList);
+  // 開頁自動從本機載入
+loadLocalSecrets();
+
+// 綁定「儲存到本機」與「清除本機憑證」按鈕
+document.getElementById('btnSaveLocal')?.addEventListener('click', saveLocalSecrets);
+document.getElementById('btnClearLocal')?.addEventListener('click', clearLocalSecrets);
+
 });
 
 
@@ -1740,6 +1754,56 @@ document.getElementById('btnExport').addEventListener('click', async()=>{
     setTimeout(()=>{ btn.disabled=false; btn.classList.remove('busy'); btn.textContent = original; }, 800);
   }
 });
+
+// ======= 本機儲存（localStorage）Key 名稱 =======
+const LS_KEY_OPENAI = 'mvp1017001_openai_key';
+const LS_KEY_GCID   = 'mvp1017001_google_client_id';
+
+// 載入：把 localStorage 的值放回輸入框
+function loadLocalSecrets(){
+  try{
+    const k = localStorage.getItem(LS_KEY_OPENAI) || '';
+    const g = localStorage.getItem(LS_KEY_GCID)   || '';
+    if (k) document.getElementById('openaiKey').value = k;
+    if (g) document.getElementById('googleClientId').value = g;
+    if (k || g) log('已從本機載入金鑰/ID。');
+  }catch(e){
+    log('讀取本機儲存失敗：'+ e.message, 'err');
+  }
+}
+
+// 儲存：把輸入框的值寫進 localStorage
+function saveLocalSecrets(){
+  try{
+    const k = (document.getElementById('openaiKey')?.value || '').trim();
+    const g = (document.getElementById('googleClientId')?.value || '').trim();
+    localStorage.setItem(LS_KEY_OPENAI, k);
+    localStorage.setItem(LS_KEY_GCID, g);
+    log('已儲存到本機（localStorage）。');
+    alert('已儲存到本機（此裝置的瀏覽器）。');
+  }catch(e){
+    log('儲存到本機失敗：'+ e.message, 'err');
+    alert('儲存到本機失敗');
+  }
+}
+
+// 清除：把 localStorage 的兩個值刪掉並清空欄位
+function clearLocalSecrets(){
+  try{
+    localStorage.removeItem(LS_KEY_OPENAI);
+    localStorage.removeItem(LS_KEY_GCID);
+    const kEl = document.getElementById('openaiKey');
+    const gEl = document.getElementById('googleClientId');
+    if (kEl) kEl.value = '';
+    if (gEl) gEl.value = '';
+    log('已清除本機儲存。');
+    alert('已清除本機儲存。');
+  }catch(e){
+    log('清除本機儲存失敗：'+ e.message, 'err');
+    alert('清除本機儲存失敗');
+  }
+}
+
 
 </script>
 </body>
