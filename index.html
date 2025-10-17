@@ -915,7 +915,7 @@ async function loadSectionPromptsFromSheet() {
   if (Object.keys(PROMPT_CACHE).length) return PROMPT_CACHE;
 
   // 只找真正的「試算表」檔，避免抓到同名 Docs/Slides
-  const f = await findSheetByExactName(SECTION_PROMPT_SHEET_NAME);
+const f = await findFileByExactName(SECTION_PROMPT_SHEET_NAME);
   if (!f) {
     log(`❗找不到 Sheet「${SECTION_PROMPT_SHEET_NAME}」，將使用內建預設提示詞。`, 'warn');
     return PROMPT_CACHE;
