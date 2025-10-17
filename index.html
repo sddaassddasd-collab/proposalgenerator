@@ -1,0 +1,1726 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>A網頁 MVP1017001</title>
+  <link rel="preconnect" href="https://accounts.google.com"/>
+  <style>
+    :root{
+      --bg:#0f172a; --panel:#111827; --fg:#e5e7eb; --muted:#94a3b8;
+      --accent:#22c55e; --danger:#ef4444; --blue:#38bdf8; --radius:14px;
+      --border:rgba(255,255,255,.12);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);
+      font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif}
+    .app{
+      display:grid;
+      grid-template-columns:340px 1fr;
+      gap:16px;
+      align-items:start;
+      padding:16px;
+      min-height:100vh;
+    }
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+    h2{margin:0 0 8px}
+    label{display:block;font-size:12px;color:var(--muted);margin:8px 0 6px}
+    input[type="text"], input[type="file"], textarea{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0b1220;color:var(--fg)}
+    textarea{min-height:120px;resize:vertical}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .btn{background:var(--accent);border:none;color:#052e1a;padding:10px 12px;border-radius:10px;font-weight:600;cursor:pointer}
+    .btn.secondary{background:#0b1220;color:var(--fg);border:1px solid var(--border)}
+    .btn.danger{background:var(--danger);color:#2a0b0b}
+    .stack{display:grid;gap:10px}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .mini{font-size:12px;color:var(--muted)}
+    /* 修改建議小欄位 */
+    .suggest{
+      width:100%;
+      border:1px solid var(--border);
+      background:#0b1220;
+      color:var(--fg);
+      border-radius:10px;
+      padding:8px 10px;
+      min-height:60px;
+      resize:vertical;
+      font-size:13px;
+    }
+    .suggest-label{
+      display:block;
+      font-size:12px;
+      color:var(--muted);
+      margin:6px 0 4px;
+    }
+
+
+
+    /* 覆蓋 .log：固定高度 + 可滾動 */
+.log{
+  white-space:pre-wrap;
+  font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  background:#0b1220;
+  border-radius:10px;
+  padding:10px;
+  border:1px solid var(--border);
+  min-height:140px;
+  max-height:220px;         /* 新增：上限高度 */
+  overflow:auto;            /* 新增：可滾動 */
+}
+
+/* 新增：任何需要成為滾動容器的區塊（舊作清單） */
+.scroll{
+  max-height:260px;
+  overflow:auto;
+  border:1px solid var(--border);
+  border-radius:10px;
+}
+
+/* 新增：按鈕忙碌樣式（操作時禁用 + 透明度） */
+.btn.busy{
+  opacity:.6;
+  pointer-events:none;
+}
+
+/* 新增：按壓瞬間的微回饋（非必需，但更直覺） */
+.btn:active{
+  transform:translateY(1px);
+}
+
+    .badge{font-size:12px;padding:2px 8px;border-radius:999px;background:#0b1220;border:1px solid var(--border);color:var(--muted)}
+    .table{width:100%;border-collapse:collapse}
+    .table th,.table td{border-bottom:1px solid var(--border);padding:8px 6px;text-align:left;font-size:14px}
+    .ok{color:#22c55e}
+    .warn{color:#f59e0b}
+    .err{color:#ef4444}
+    .section{border:1px dashed var(--border);border-radius:12px;padding:12px}
+    .section h3{margin:0 0 8px}
+    .section .actions{display:flex;gap:8px;margin:6px 0 8px}
+  </style>
+
+  <!-- 讀 .docx -->
+  <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+  <!-- 讀 .pdf -->
+  <script src="https://unpkg.com/pdfjs-dist/build/pdf.min.js"></script>
+  <script>
+    if (window['pdfjsLib']) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist/build/pdf.worker.min.js';
+    }
+  </script>
+</head>
+<body>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <div class="app">
+    <!-- 左側：設定與上傳 -->
+    <div class="card stack">
+      <h2>① 基本設定</h2>
+      <div class="stack">
+        <div>
+          <label>OpenAI API Key（只存在此頁記憶，不上傳）</label>
+          <input id="openaiKey" type="text" placeholder="sk-..." />
+          <div class="row"><span class="mini">建議先不要存 localStorage，頁面刷新即清空。</span></div>
+        </div>
+        <div class="grid2">
+          <div>
+            <label>Google OAuth Client ID（Web）</label>
+            <input id="googleClientId" type="text" placeholder="xxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com" />
+          </div>
+          <div>
+            <label>授權狀態</label>
+            <div id="authStatus" class="badge">尚未登入</div>
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn" id="btnGoogleAuth">Google 登入授權</button>
+          <button class="btn secondary" id="btnLogout">登出</button>
+        </div>
+      </div>
+
+      <h2>② 會議記錄</h2>
+      <div class="stack">
+        <input id="minutesFile" type="file" accept=".txt,.md,.docx,.pdf,.rtf,.json" />
+        <button class="btn" id="btnParse">上傳並抽取關鍵資訊 → 解析</button>
+        <textarea id="minutesPreview" placeholder="會議記錄摘要（自動產生，可手動修）"></textarea>
+        <div class="grid2">
+          <div>
+            <label>作品名稱（ex. 洋基之子 / 共同好友）</label>
+            <input id="workTitle" type="text" />
+          </div>
+          <div>
+            <label>年度（ex. 2026）</label>
+            <input id="workYear" type="text" />
+          </div>
+        </div>
+        <div class="grid2">
+          <div>
+            <label>場地</label>
+            <input id="venue" type="text" />
+          </div>
+          <div>
+            <label>檔期（日期區間或月份）</label>
+            <input id="dates" type="text" />
+          </div>
+        </div>
+        <div>
+          <label>本輪調整重點（逗號分隔）</label>
+          <input id="adjustments" type="text" placeholder="加強台語文本, 舞台改可拆組, 增列永續章節" />
+        </div>
+      </div>
+
+      <div class="stack">
+  <div class="row">
+    <button class="btn secondary" id="btnScanOld">掃描舊作</button>
+    <button class="btn secondary" id="btnApplyRename">套用建議命名</button>
+  </div>
+
+  <div class="row">
+    <input id="oldSearch" type="text" placeholder="搜尋舊作（檔名或建議新檔名）" />
+    <span class="mini">← 即時篩選（關鍵字）</span>
+  </div>
+
+  <div class="mini">規則：<code>【作品】_【年份】_【類型】_v01.ext</code>（例：<code>洋基之子_2024_劇本_v01.docx</code>）</div>
+
+  <!-- 加上滾動外框 -->
+  <div id="oldListWrap" class="scroll">
+    <table class="table" id="renameTable">
+      <thead>
+        <tr><th>原檔名</th><th>建議新檔名</th><th>執行狀態</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+</div> <!-- ← 補這一行 -->
+
+
+    <!-- 右側：流程與分段生成 -->
+    <div class="card stack">
+      <h2>④ 自動佈署＆生成／修訂／匯出</h2>
+      <div class="row">
+        <button class="btn" id="btnDeploy">建資料夾結構</button>
+        <button class="btn secondary" id="btnWriteDoc">整合目前各段 → 寫入 Docs</button>
+        <button class="btn secondary" id="btnExport">匯出 PDF → 存回 Drive</button>
+      </div>
+
+      <!-- 分段卡片 -->
+      <div class="stack" id="sections">
+
+        <!-- 緣起與目標 -->
+        <div class="section" data-sec="originGoals">
+          <h3>計畫緣起與目標</h3>
+          <div class="mini">緣起（劇本主題＋會議記錄關鍵句約500字）｜計畫目標（3–5點，KR導向、可量化）</div>
+          <div class="actions">
+            <button class="btn" data-gen="originGoals">生成這一段</button>
+            <button class="btn secondary" data-write="originGoals">寫入 Docs</button>
+          </div>
+          <label class="suggest-label">修改建議（不重寫，只微調；要整段重寫請輸入「重寫」）：</label>
+          <textarea id="sug-originGoals" class="suggest" placeholder="例：避免空話、把量化指標放前面、加上在地合作脈絡"></textarea>
+
+          <textarea id="sec-originGoals"></textarea>
+        </div>
+
+        <!-- 作品與內容說明 -->
+        <div class="section" data-sec="workDescription">
+          <h3>作品與內容說明</h3>
+          <div class="mini">劇情簡介（150–250字）｜主題與議題（語言、身份、文化等）｜演出形式與特色（空間、聲景、物件、肢體、語言配置）</div>
+          <div class="actions">
+            <button class="btn" data-gen="workDescription">生成這一段</button>
+            <button class="btn secondary" data-write="workDescription">寫入 Docs</button>
+          </div>
+          <label class="suggest-label">修改建議（不重寫，只微調；要整段重寫請輸入「重寫」）：</label>
+          <textarea id="sug-workDescription" class="suggest" placeholder="例：聚焦角色動機、降低劇透、補上場景轉換節奏"></textarea>
+
+          <textarea id="sec-workDescription"></textarea>
+        </div>
+
+        <!-- 創作與製作團隊 -->
+        <div class="section" data-sec="team">
+          <h3>創作與製作團隊</h3>
+          <div class="mini">主要人員（表格：姓名｜職務｜簡介50–80字｜代表作）｜顧問與合作單位（若有）｜資料不足標示「待補」</div>
+          <div class="actions">
+            <button class="btn" data-gen="team">生成這一段</button>
+            <button class="btn secondary" data-write="team">寫入 Docs</button>
+          </div>
+          <label class="suggest-label">修改建議（不重寫，只微調；要整段重寫請輸入「重寫」）：</label>
+          <textarea id="sug-team" class="suggest" placeholder="例：補充各設計師代表作、標示（可能）人選、簡介精簡到80字內"></textarea>
+
+          <textarea id="sec-team"></textarea>
+        </div>
+
+        <!-- 製作期程（甘特表） -->
+        <div class="section" data-sec="schedule">
+          <h3>製作期程（甘特表）</h3>
+          <div class="mini">表格：年月｜項目｜說明｜負責人；多場地請分列版本</div>
+          <div class="actions">
+            <button class="btn" data-gen="schedule">生成這一段</button>
+            <button class="btn secondary" data-write="schedule">寫入 Docs</button>
+          </div>
+          <label class="suggest-label">修改建議（不重寫，只微調；要整段重寫請輸入「重寫」）：</label>
+          <textarea id="sug-schedule" class="suggest" placeholder="例：把宣傳前置拉早兩週、增加技測里程碑、區分A/B場地版本"></textarea>
+
+          <textarea id="sec-schedule"></textarea>
+        </div>
+
+        <!-- 技術需求與舞台配置 -->
+        <div class="section" data-sec="tech">
+          <h3>技術需求與舞台配置</h3>
+          <div class="mini">舞台／座位｜燈光／音響／投影／特需（多語字幕、台語比例）｜無障礙與共融（若未定列可行方案＋成本帶，無則免）</div>
+          <div class="actions">
+            <button class="btn" data-gen="tech">生成這一段</button>
+            <button class="btn secondary" data-write="tech">寫入 Docs</button>
+          </div>
+          <label class="suggest-label">修改建議（不重寫，只微調；要整段重寫請輸入「重寫」）：</label>
+          <textarea id="sug-tech" class="suggest" placeholder="例：加入字幕設備可行方案與成本帶、提高台語台詞比例、補輪椅席"></textarea>
+
+          <textarea id="sec-tech"></textarea>
+        </div>
+
+        <!-- 行銷與票務策略 -->
+        <div class="section" data-sec="marketing">
+          <h3>行銷與票務策略</h3>
+          <div class="mini">受眾分層與訊息主軸（3版 Slogan＋貼文骨架）｜通路與節點｜票務策略（票別／早鳥／套票／KPI）｜社群節奏表（週次｜素材｜CTA｜預期觸及／轉換）</div>
+          <div class="actions">
+            <button class="btn" data-gen="marketing">生成這一段</button>
+            <button class="btn secondary" data-write="marketing">寫入 Docs</button>
+          </div>
+          <label class="suggest-label">修改建議（不重寫，只微調；要整段重寫請輸入「重寫」）：</label>
+          <textarea id="sug-marketing" class="suggest" placeholder="例：加入台語社群KOL名單、提高早鳥比例、替換一組Slogan走生活感"></textarea>
+
+          <textarea id="sec-marketing"></textarea>
+        </div>
+
+        <!-- 預算與資源配置 -->
+        <div class="section" data-sec="budget">
+          <h3>預算與資源配置（試算表）</h3>
+          <div class="mini">表格：項目｜細目｜單價×數量｜小計｜備註；若有總預算／單項預算則代入，其餘標示「待補」</div>
+          <div class="actions">
+            <button class="btn" data-gen="budget">生成這一段</button>
+            <button class="btn secondary" data-write="budget">寫入 Docs</button>
+          </div>
+          <label class="suggest-label">修改建議（不重寫，只微調；要整段重寫請輸入「重寫」）：</label>
+          <textarea id="sug-budget" class="suggest" placeholder="例：把預備金改為8%、加入交通保險、宣傳改按分眾拉投放"></textarea>
+
+          <textarea id="sec-budget"></textarea>
+        </div>
+
+      </div>
+
+      <h2>⑤ 日誌</h2>
+      <div id="log" class="log">準備就緒。</div>
+    </div>
+
+  </div>
+
+<script>
+// ======= 簡易狀態 =======
+let accessToken = null;          // Google OAuth token
+let tokenClient = null;          // GIS token client
+let DRIVE_ROOT_NAME = '劇團AI測試';     // 根目錄
+let CURRENT_DOC_ID = null;       // 目前生成的 Docs
+let YEAR_FOLDER_ID = null;       // 年度資料夾 ID
+let WORK_FOLDER_ID = null;       // 作品資料夾 ID
+let DOCS_OUT_FOLDER_ID = null;   // 作品下「製作/計畫書」資料夾 ID（Docs/PDF 都存這）
+
+// ★任務模板來源（優先讀 Sheet，找不到再讀 JSON）
+const TASK_TEMPLATE_SHEET_NAME = '劇團計畫-任務模板';
+const TASK_TEMPLATE_JSON_NAME  = '劇團計畫-任務模板.json';
+
+
+// === 舊作勾選與索引 ===
+const SELECTED_OLD_FILE_IDS = new Set(); // 使用者勾選的舊作 fileId
+const DRIVE_FILE_INDEX = {};             // id -> { id, name, mimeType }
+let CURRENT_EXTRA_MINUTES = '';          // 單次生成時暫存的「舊作文字」
+
+
+// 暫存每段結果（不放 localStorage）
+const SECTIONS = {
+  originGoals: '',
+  workDescription: '',
+  team: '',
+  schedule: '',
+  tech: '',
+  marketing: '',
+  budget: ''
+};
+
+// 推薦 Scopes：
+const SCOPES = [
+  // 讀取任意你有權限看的檔案內容（必要，否則會 403 appNotAuthorizedToFile）
+  'https://www.googleapis.com/auth/drive.readonly',
+
+  // 仍保留：可存取 App 自己建立的檔案（建立 Docs / 上傳 PDF 等）
+  'https://www.googleapis.com/auth/drive.file',
+
+  // 列出檔案必要的中繼資料
+  'https://www.googleapis.com/auth/drive.metadata.readonly',
+
+  // 操作 Google Docs（寫入內容）
+  'https://www.googleapis.com/auth/documents',
+
+    // ★新增：Google Tasks（建立清單與代辦）
+  'https://www.googleapis.com/auth/tasks'
+
+];
+
+
+// Google API endpoints
+const GDRIVE_FILES = 'https://www.googleapis.com/drive/v3/files';
+const GDRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
+const GDOCS = 'https://docs.googleapis.com/v1/documents';
+
+const log = (msg, type='') => {
+  const el = document.getElementById('log');
+  const now = new Date().toLocaleTimeString();
+  el.textContent += `\n[${now}] ${msg}`;
+  el.scrollTop = el.scrollHeight;
+}
+function setAuthStatus(txt){ document.getElementById('authStatus').textContent = txt; }
+
+// ======= 基礎純文字清理 & 截斷工具 =======
+function sanitizeText(t){
+  return (t||'')
+    .replace(/[^\S\r\n]+/g, ' ')
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '')
+    .replace(/\r\n/g, '\n')
+    .trim();
+}
+function safeSliceForLLM(text, maxChars = 15000){
+  const t = sanitizeText(text);
+  return t.length > maxChars ? t.slice(0, maxChars) : t;
+}
+
+// ======= OAuth 登入 =======
+function initGoogle(){
+  const clientId = document.getElementById('googleClientId').value.trim();
+  if(!clientId){ alert('請先填入 Google OAuth Client ID'); return; }
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: clientId,
+    scope: SCOPES.join(' '),
+    callback: (resp)=>{
+      if(resp && resp.access_token){
+        accessToken = resp.access_token;
+        setAuthStatus('已登入');
+        log('Google OAuth 成功。');
+      }else{
+        log('Google OAuth 失敗。','err');
+      }
+    }
+  });
+  tokenClient.requestAccessToken({prompt: 'consent'});
+}
+function logout(){ accessToken = null; setAuthStatus('尚未登入'); log('已登出。'); }
+
+// ======= 讀檔工具：支援 txt/md/docx/pdf（本機上傳用）=======
+async function readFileAsText(file){
+  const ext = (file.name.split('.').pop()||'').toLowerCase();
+  const sizeMB = file.size / (1024*1024);
+  if(sizeMB > 10) throw new Error('檔案過大（>10MB），請先精簡或分段。');
+
+  // 純文字
+  if(['txt','md','markdown','json'].includes(ext)){
+    const text = await new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onload = ()=> resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsText(file);
+    });
+    return sanitizeText(text);
+  }
+
+  // Word（.docx）
+  if(ext === 'docx'){
+    const arrayBuffer = await new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onload = ()=> resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+    const { value: html } = await window.mammoth.convertToHtml({ arrayBuffer });
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const paragraphs = Array.from(tmp.querySelectorAll('p, h1, h2, h3, h4, h5, h6'))
+      .map(el => el.textContent.trim())
+      .filter(Boolean);
+    const text = paragraphs.join('\n\n');
+    return sanitizeText(text);
+  }
+
+  // PDF（可擷取文字的 PDF）
+  if(ext === 'pdf'){
+    const arrayBuffer = await new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onload = ()=> resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const maxPages = Math.min(pdf.numPages, 150);
+    let out = [];
+    for(let p=1; p<=maxPages; p++){
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      const line = content.items.map(it => it.str).join(' ');
+      out.push(line);
+      if(out.join('\n').length > 100000) break; // 安全上限
+    }
+    const text = out.join('\n\n').trim();
+    if(!text) throw new Error('這份 PDF 沒內嵌可讀文字（可能是掃描影像）。請先用 OCR 轉成可搜尋文字的 PDF 或 .txt/.docx 再上傳。');
+    return sanitizeText(text);
+  }
+
+  // 其他不支援（避免亂碼）
+  throw new Error('目前支援：.txt/.md/.json/.docx/.pdf；其他格式請先轉檔。');
+}
+
+// ======= CSV 解析（支援引號與逗號）=======
+function parseCSV(csvText, maxRows = 5000) {
+  const rows = [];
+  let row = [];
+  let cur = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < csvText.length; i++) {
+    const ch = csvText[i];
+    const next = csvText[i + 1];
+
+    if (inQuotes) {
+      if (ch === '"' && next === '"') { // 轉義引號 ""
+        cur += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        cur += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        row.push(cur);
+        cur = '';
+      } else if (ch === '\n') {
+        row.push(cur);
+        rows.push(row);
+        cur = '';
+        row = [];
+        if (rows.length >= maxRows) break;
+      } else if (ch !== '\r') {
+        cur += ch;
+      }
+    }
+  }
+  if (cur.length || row.length) {
+    row.push(cur);
+    rows.push(row);
+  }
+  return rows;
+}
+
+// ======= CSV → 文字摘要（控制長度，避免把整份表貼進 LLM）=======
+function summarizeCsvToText(csvText, {sampleRows = 60, sampleCols = 12} = {}) {
+  const rows = parseCSV(csvText, sampleRows + 1);
+  if (!rows.length) return '';
+
+  const headers = rows[0].map(h => (h || '').trim()).slice(0, sampleCols);
+  const data = rows.slice(1).map(r =>
+    headers.reduce((o, h, idx) => {
+      o[h || `col${idx+1}`] = (r[idx] || '').trim();
+      return o;
+    }, {})
+  );
+
+  const approxRows = rows.length;
+  const colCount = headers.length;
+
+  const sample = data.slice(0, sampleRows).map(obj=>{
+    const trimmed = {};
+    for(const k of Object.keys(obj)) {
+      const v = obj[k] || '';
+      trimmed[k] = v.length > 80 ? (v.slice(0,80) + '…') : v;
+    }
+    return JSON.stringify(trimmed);
+  });
+
+  return [
+    '[Google Sheet 摘要]',
+    `欄數：${colCount}｜（抽樣）列數：約 ${approxRows - 1}`,
+    `欄位：${headers.join(' | ')}`,
+    '樣本（JSON Lines；僅前幾列）：',
+    ...sample
+  ].join('\n');
+}
+
+// ★把 Google Sheet (CSV 匯出) 轉成任務陣列
+async function loadTaskTemplatesFromSheet(ctx) {
+  const f = await findFileByExactName(TASK_TEMPLATE_SHEET_NAME);
+  if (!f) return null;
+  if (f.mimeType !== 'application/vnd.google-apps.spreadsheet') return null;
+
+  // 匯出 CSV
+  const res = await gfetch(`${GDRIVE_FILES}/${f.id}/export?mimeType=text/csv&supportsAllDrives=true`);
+  const csv = await res.text();
+  const rows = parseCSV(csv);
+  if (!rows.length) return [];
+
+  const headers = rows[0].map(h => (h || '').trim());
+  const idx = (name) => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
+
+  const iEnabled = idx('enabled');
+  const iTitle = idx('title');
+  const iNotes = idx('notes');
+  const iDue = idx('due_offset_days');
+  const iList = idx('list_name');
+  const iL1T = idx('link1_text');
+  const iL1U = idx('link1_url');
+  const iL2T = idx('link2_text');
+  const iL2U = idx('link2_url');
+
+  const tReplace = (s='') => s
+    .replaceAll('{{title}}', ctx.title || '')
+    .replaceAll('{{year}}', ctx.year || '')
+    .replaceAll('{{workFolderUrl}}', ctx.workFolderUrl || '')
+    .replaceAll('{{planFolderUrl}}', ctx.planFolderUrl || '');
+
+  const out = [];
+  rows.slice(1).forEach(r => {
+    const enabled = ((r[iEnabled] || '').toString().toLowerCase().trim() === 'true');
+    if (!enabled) return;
+
+    const t = tReplace(r[iTitle] || '');
+    const n = tReplace(r[iNotes] || '');
+    const dueOffset = parseInt((r[iDue] || '0').trim(), 10) || 0;
+    const listName = (r[iList] || '').trim(); // 先保留（等下會強制覆寫成「年度,作品」）
+
+    const links = [];
+    const l1t = tReplace(r[iL1T] || ''), l1u = tReplace(r[iL1U] || '');
+    const l2t = tReplace(r[iL2T] || ''), l2u = tReplace(r[iL2U] || '');
+    if (l1t && l1u) links.push({ type: 'link', description: l1t, link: l1u });
+    if (l2t && l2u) links.push({ type: 'link', description: l2t, link: l2u });
+
+    const d = new Date(); d.setDate(d.getDate() + dueOffset);
+    const dueISODate = d.toISOString().slice(0,10); // YYYY-MM-DD
+
+    out.push({ title: t, notes: n, dueISODate, links, listName });
+  });
+
+  return out;
+}
+
+// ★後備：讀 Drive 上 JSON 檔 → 任務陣列
+async function loadTaskTemplatesFromJson(ctx) {
+  const f = await findFileByExactName(TASK_TEMPLATE_JSON_NAME);
+  if (!f) return null;
+  const blobRes = await gfetch(`${GDRIVE_FILES}/${f.id}?alt=media&supportsAllDrives=true`);
+  const txt = await blobRes.text();
+  let arr = [];
+  try { arr = JSON.parse(txt); } catch { return []; }
+
+  const tReplace = (s='') => s
+    .replaceAll('{{title}}', ctx.title || '')
+    .replaceAll('{{year}}', ctx.year || '')
+    .replaceAll('{{workFolderUrl}}', ctx.workFolderUrl || '')
+    .replaceAll('{{planFolderUrl}}', ctx.planFolderUrl || '');
+
+  return (arr || [])
+    .filter(x => String(x.enabled).toLowerCase() === 'true')
+    .map(x => {
+      const dueOffset = parseInt((x.due_offset_days ?? 0), 10) || 0;
+      const d = new Date(); d.setDate(d.getDate() + dueOffset);
+      const dueISODate = d.toISOString().slice(0,10);
+      const links = Array.isArray(x.links) ? x.links.map(l => ({
+        type: 'link',
+        description: tReplace(l.description || ''),
+        link: tReplace(l.link || '')
+      })) : [];
+      return {
+        title: tReplace(x.title || ''),
+        notes: tReplace(x.notes || ''),
+        dueISODate,
+        links,
+        listName: (x.list_name || '')
+      };
+    });
+}
+
+// ★統一入口：先讀 Sheet，沒有再讀 JSON
+async function loadTaskTemplates(ctx) {
+  const fromSheet = await loadTaskTemplatesFromSheet(ctx);
+  if (fromSheet && fromSheet.length !== null) return fromSheet;
+  const fromJson = await loadTaskTemplatesFromJson(ctx);
+  return fromJson || [];
+}
+
+
+
+// ======= 讀取 Blob → 文字（Drive 下載用；支援 txt/md/json/docx/pdf）=======
+async function readBlobAsText(blob, filename = 'file', mimeType = '') {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  const type = (mimeType || blob.type || '').toLowerCase();
+
+  if (['txt','md','markdown','json'].includes(ext) || type.startsWith('text/')) {
+    return sanitizeText(await blob.text());
+  }
+
+  if (ext === 'docx' || type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    const arrayBuffer = await blob.arrayBuffer();
+    const { value: html } = await window.mammoth.convertToHtml({ arrayBuffer });
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const paragraphs = Array.from(tmp.querySelectorAll('p, h1, h2, h3, h4, h5, h6'))
+      .map(el => el.textContent.trim())
+      .filter(Boolean);
+    return sanitizeText(paragraphs.join('\n\n'));
+  }
+
+  if (ext === 'pdf' || type === 'application/pdf') {
+    const arrayBuffer = await blob.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const maxPages = Math.min(pdf.numPages, 150);
+    let out = [];
+    for (let p = 1; p <= maxPages; p++) {
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      out.push(content.items.map(it => it.str).join(' '));
+      if (out.join('\n').length > 100000) break;
+    }
+    const text = out.join('\n\n').trim();
+    if (!text) throw new Error(`PDF 無可讀文字：${filename}`);
+    return sanitizeText(text);
+  }
+
+  return '';
+}
+
+// ======= 從 Google Drive 抓檔並轉成純文字（含 Shortcut/Docs/Sheet/Slides/一般檔）=======
+async function fetchDriveFileText(fileId) {
+  if (!accessToken) throw new Error('尚未取得 Google Access Token');
+
+  // 先取索引中的基本資料；若沒有就打一次 metadata（加 supportsAllDrives）
+  let meta = DRIVE_FILE_INDEX[fileId];
+  if (!meta) {
+    const res = await gfetch(`${GDRIVE_FILES}/${fileId}?fields=id,name,mimeType,shortcutDetails(targetId,targetMimeType)&supportsAllDrives=true`);
+    meta = await res.json();
+  }
+
+  // 解捷徑：指向真正目標
+  let effId = meta.id;
+  let effMime = meta.mimeType || '';
+  let effName = meta.name || '';
+
+  if (effMime === 'application/vnd.google-apps.shortcut') {
+    const sd = meta.shortcutDetails;
+    if (!sd || !sd.targetId) {
+      log(`捷徑缺少目標資訊：${effName}`, 'warn');
+      return '';
+    }
+    effId = sd.targetId;
+    effMime = sd.targetMimeType || '';
+
+    // 再補一次目標名稱（可選）
+    try {
+      const tRes = await gfetch(`${GDRIVE_FILES}/${effId}?fields=id,name,mimeType&supportsAllDrives=true`);
+      const tMeta = await tRes.json();
+      effName = tMeta.name || effName;
+      effMime = tMeta.mimeType || effMime;
+    } catch {}
+  }
+
+  // Google Docs → 純文字匯出
+  if (effMime === 'application/vnd.google-apps.document') {
+    const res = await gfetch(`${GDRIVE_FILES}/${effId}/export?mimeType=text/plain&supportsAllDrives=true`);
+    const txt = await res.text();
+    return sanitizeText(txt);
+  }
+
+  // Google Sheets → 匯出 CSV → 摘要
+  if (effMime === 'application/vnd.google-apps.spreadsheet') {
+    const res = await gfetch(`${GDRIVE_FILES}/${effId}/export?mimeType=text/csv&supportsAllDrives=true`);
+    const csv = await res.text();
+    const summary = summarizeCsvToText(csv, { sampleRows: 60, sampleCols: 12 });
+    return sanitizeText(summary);
+  }
+
+  // Google Slides → 匯出 PDF → 轉文字（pdfjs）
+  if (effMime === 'application/vnd.google-apps.presentation') {
+    const res = await gfetch(`${GDRIVE_FILES}/${effId}/export?mimeType=application/pdf&supportsAllDrives=true`);
+    const pdfBlob = await res.blob();
+    return await readBlobAsText(pdfBlob, effName + '.pdf', 'application/pdf');
+  }
+
+  // 其他 Google 檔（如 Drawings）暫不支援
+  if (effMime.startsWith('application/vnd.google-apps.')) {
+    log(`尚未支援的 Google 檔類型：${effMime}（${effName}）`, 'warn');
+    return '';
+  }
+
+  // 一般上傳檔（docx/pdf/txt/md/json…）→ alt=media 下載
+  const blobRes = await gfetch(`${GDRIVE_FILES}/${effId}?alt=media&supportsAllDrives=true`);
+  const blob = await blobRes.blob();
+  return await readBlobAsText(blob, effName, effMime);
+}
+
+
+
+// ======= 收集使用者勾選的舊作文字，做長度上限裁切（全域可用）=======
+async function gatherSelectedOldTexts(maxChars = 15000) {
+  if (!SELECTED_OLD_FILE_IDS.size) return '';
+  let chunks = [];
+  let picked = [];
+
+  for (const id of SELECTED_OLD_FILE_IDS) {
+    try {
+      const t = await fetchDriveFileText(id);
+      if (t) {
+        chunks.push(t);
+        picked.push(DRIVE_FILE_INDEX[id]?.name || id);
+      }
+    } catch (e) {
+      log(`讀取舊作失敗（${id}）：${e.message}`, 'err');
+    }
+    const joined = chunks.join('\n\n');
+    if (joined.length > maxChars) break;
+  }
+
+  if (picked.length) log(`已併入舊作：${picked.join('、')}`);
+
+  return safeSliceForLLM(chunks.join('\n\n'), maxChars);
+}
+
+
+// ======= OpenAI 基本呼叫（含詳細錯誤日誌） =======
+async function openaiChat(messages, {json=false, temperature=0.3}={}) {
+  const key = document.getElementById('openaiKey').value.trim();
+  if(!key) throw new Error('請先填入 OpenAI Key');
+
+  // <<< 這裡改成你的 Workers URL >>>
+  const PROXY_URL = 'https://script.google.com/macros/s/AKfycbzbZ5qy-_Fy7-BJJBKR0LE7w3xjxPbDBK9ipkyzMtGSR18FaeQrluFvZx6aRwUlFYLP/exec';
+
+  const body = {
+    // 使用者的 key 放在 body，由 Proxy 代叫 OpenAI
+    key,
+    model: 'gpt-4o-mini',
+    messages,
+    temperature,
+    ...(json ? { response_format: { type: 'json_object' } } : {})
+  };
+
+  let res;
+  try {
+    res = await fetch(PROXY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify(body)
+    });
+  } catch (networkErr) {
+    log('無法連線到 Proxy：' + (networkErr?.message || networkErr), 'err');
+    throw new Error('無法連線到 Proxy（網路或外掛阻擋）。');
+  }
+
+  let j = {};
+  try { j = await res.json(); } catch {}
+
+  if (!res.ok) {
+    const msg = j?.error?.message || JSON.stringify(j);
+    log(`Proxy/OpenAI 錯誤（${res.status}）：${msg}`, 'err');
+    throw new Error(`Proxy/OpenAI 呼叫失敗（${res.status}）：${msg}`);
+  }
+
+  const content = j.choices?.[0]?.message?.content;
+  if (!content) throw new Error('OpenAI 回應為空');
+  return content;
+}
+
+function shouldRewrite(sug=''){
+  const s = (sug||'').toLowerCase();
+  return /(重寫|重新寫|rewrite|from scratch|重新來|整段重做)/.test(s);
+}
+
+// 依「舊內容 + 修改建議」做精修（非重寫）
+async function reviseSection(secKey, oldText, suggestion){
+  const ctx = buildCommonContext();
+  const sys = `你是一位中文計劃書編輯。除非使用者明確指示「重寫」，否則「只在既有內容上」做最小必要變動，保持原段落結構與資訊密度，不新增未經確認的資料。輸出純文字（可含原有 Markdown 表格），不要加任何說明。`;
+  const ask = `
+請根據「修改建議」微調下列內容；能局部改就絕不整段重寫，保留原用語風格與資訊結構：
+
+【段落類型】${secKey}
+【已有內容】
+${oldText}
+
+【修改建議】
+${suggestion}
+
+【可引用之背景（會議記錄精簡）】
+${(ctx.minutes||'').slice(0,1200)}
+  `.trim();
+
+  const out = await openaiChat([
+    {role:'system',content:sys},
+    {role:'user',content:ask}
+  ],{temperature:0.25});
+  return out;
+}
+
+
+// ======= 從會議記錄抽取欄位 =======
+async function extractFromMinutes(raw){
+  const snippet = safeSliceForLLM(raw, 15000); // 只送前 15k 字
+  const sys = `你是一個會議記錄抽取助手。從輸入文字抽取：year、title、venue、dates（字串）、adjustments（陣列），皆為繁體中文。若無請留空或給空陣列。輸出必須是純 JSON 物件，不得包含多餘文字或註解。`;
+  const prompt = `會議記錄如下（節錄）：\n\n${snippet}`;
+  const content = await openaiChat([
+    {role:'system', content:sys},
+    {role:'user', content:prompt}
+  ],{json:true, temperature:0.2});
+
+  // 防禦性清理 fenced code
+  let clean = content.trim();
+  clean = clean.replace(/^```json\s*/i,'').replace(/```$/,'').trim();
+  try{
+    return JSON.parse(clean);
+  }catch(e){
+    throw new Error('解析抽取結果失敗：回傳並非有效 JSON。原始內容片段：\n' + clean.slice(0,500));
+  }
+}
+
+// ======= 產生各段內容的提示詞 =======
+function buildCommonContext(){
+  const year = document.getElementById('workYear').value.trim();
+  const title = document.getElementById('workTitle').value.trim();
+  const venue = document.getElementById('venue').value.trim();
+  const dates = document.getElementById('dates').value.trim();
+  const adjustments = document.getElementById('adjustments').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const minutesRaw = document.getElementById('minutesPreview').value.trim();
+  const minutesCombined = [minutesRaw, CURRENT_EXTRA_MINUTES].filter(Boolean).join('\n\n');
+  return {year,title,venue,dates,adjustments,minutes: minutesCombined};
+}
+
+
+
+async function gen_originGoals(opts={}){
+  const ctx = buildCommonContext();
+  const sys = `你是嚴謹的劇團計畫書寫手，輸出繁體中文，語氣正式扼要。`;
+  const ask = `
+請參考以下幾個模板的文字風格、格式與字數（不要參考樣板內容，內容以劇本與會議記錄與其他參考資料為主），不列點生成「計畫緣起與目標」，字數一定要達600字，可以多去討論這個作品與台灣的關係：
+模板一：棒球在這數十年間都作為台灣國球，其背後卻隱含著複雜的殖民史和地緣政治的背景。棒球於19世紀初，因為日本明治維新大量對外國的開放，隨著西方的經貿往來、文化輸出而傳入日本。而隨著日本在亞洲擴張的野心，棒球也隨著殖民主義傳入台灣，隨著紅葉棒球和嘉農棒球隊擊敗日本球隊的事件，棒球開始成為台灣用來證明自己的方式。這樣的脈絡甚至延續到了國民政府來台，在中華民國與美國斷交後，台灣人民又再度尋求以棒球，透過擊敗美國的少棒隊來建構自己的認同，這樣的意識形態甚至延伸到了渴望王建民在美國職棒大聯盟的成功。
+這樣的現象不僅僅反映在了國際賽事的勝負，甚至根深柢固的在文化上受到美、日兩國意識形態的影響，而語言也是最直接反應的現象。台語在日本殖民時期大量的受到日本文化影響，夾雜了許多的日文字詞，這樣的現象也在棒球的術語中可以看到大量的例子，包含安打(Hitto)、紅不讓(Homerun)等等我們耳熟能詳的字詞都是從日本傳進來，進而演變成本土台灣選手在球場上的詞彙。而在二戰過後冷戰時期，台灣與美國共屬同一個陣營的情況之下，美國變成了另外一個台灣人所嚮往的地方，而英語也成為了台灣人所嚮往的語言之一，加上國民政府對於本土語言的打壓，台語慢慢的從生活語言慢慢消失。在這一段漫漫長路的身份與認同的追尋當中，台灣人的身份也慢慢的模糊。
+《洋基之子》這齣戲以語言和身份作為主題，書寫一名七零年底在美軍駐台時期，一個美國軍人與台灣女子生下的小孩麥可。故事圍繞麥可的身份認同之旅展開，他在童年時因父母衝突失去了家庭溫暖，隨母親返回台灣後，因混血身份遭受村莊和學校的排斥。成年後，他為尋求屬於自己的歸屬，踏上尋母和追尋棒球夢的旅程。他到日本效仿偶像伊良部秀輝，希望透過棒球成為社會的一部分，但失敗後輾轉到美國，期望憑藉與父親的連結獲得認同。
+在這個演出中，麥可受到母親影響，母語是台語，但在成長與教育的過程中，不斷接觸到不同的語言，包含父親說的英語、學校使用的華語，或是在棒球隊所需要用的日語，這些混雜之下凸顯了台灣在不同文化的交雜中我們集體的渴望的方向與淺意識。
+我們計畫於2025年12月進行兩場《相信世代》演出，預計邀請約100名觀眾參與，並透過這次演出讓觀眾深入思考語言、文化和身份認同的議題。隨後，於2026年5月，我們將在國家戲劇院實驗劇場進行四場正式演出，預計參與觀眾800名。期待可以藉由這個創作的，重新審視我們習以為常的語言和運動賽事背後的權力架構與角力，並打開未來巡演的機會，在未來持續的在不同的場館演出。
+模板二：從2019年開始，王珩開啟了以「每個人的身體都藏有故事」的概念開啟了「身體記事創作計畫」，期間發展了以素人女性為主題的《我們在此出發》、《跳針》以及《四季》三部曲，並且與聾人表演者合作，於2022年創作《在安靜中跳舞》。而在經過四年的身體記事計畫後，王珩決定在三十歲從自己的身體出發，挖掘自己的身體故事。
+　　王珩從小生長在高雄，因為母親的要求開始學習舞蹈，從小學接觸踢踏舞，短暫進入劇校學習傳統的武功，並且後來又學習芭蕾、現代舞進入舞蹈班。回顧這些學習的歷程，背後的原因滿滿是母親的未盡之事，例如母親將自己當明星的夢想寄託在王珩身上，或是期望自己女兒能夠成為中國傳統文化的代言人，以及希望自己的家庭能夠符合90年代台灣中產階級的想像等等。這些未盡之事背後都隱含著不同時期台灣的共同價值與敘事，和個人的無奈。
+　　然而這些期待並沒有依著母親期望的方向走，舞蹈反倒成為王珩離開家裡、離開高雄的理由，並以此開始追尋自己的舞蹈生涯。這時代的變遷之中，新一代的人產生了自己的敘事，而上一輩過去所相信的敘事也隨之被拋下了。我們發現這樣的情形在台灣這塊土地上是屢見不鮮的，台灣自60年代開始經歷快速發展，社會變遷越來越快，上一輩的人與我們這一輩在不同生命經驗之下產生不同的價值產生出許多的衝突。然而快速轉變的這些無奈之中，往往讓許多人感到錯亂、無法掌握，因此產生經驗與現實之間有著巨大落差的感受。
+　　因此開啟了《打人的狗》做計劃，以王珩的家鄉高雄的舊名: 打狗為題，以翻轉的方式呈現不同時代敘事的錯亂，並用王珩自己的舞蹈經驗訴說母親與自己之間的故事，梳理舞蹈與母親所經驗過的不同時代的關係。我們希望能夠用這個作品以及自己身體故事與上一輩和解，同時與同輩的人創造對話的空間。並且也讓下一輩的人感受台灣人們在這段時間經歷的複雜環境，以及我們如何成為現在的樣子，讓這個作品可以成為一個彼此理解的可能。
+　　2023年11月預計以45分鐘版於樹林藝文中心呈現《在樹林打人的狗》，內容關注於王珩學習跳舞的故事。2024年五月預計於高雄演出版本，將會以全長60分鐘版本呈現「身體記事創作計畫《打人的狗》」正式演出，加入更多母親與王珩的互動，呈現家庭故事、在地歷史和個人經驗的交互敘事。
+模板三：複象公場長期以來都以不同面向的社會族群、事件或是歷史作為創作素材，並且嘗試以更多元的視角進入劇場的創作視野的可能。過去和聾人族群相處時，發現聾人族群大多數觀賞表演藝術的經驗都非常有限，其中主要原因為現場表演大多數都缺少可以讓他們理解的方法。近十年仍然有許多團隊努力在發展讓聾人可以進入表演藝術，然而有許多的演出仍然僅僅是讓聾人「證明」他們有和聽人一樣的能力，而往往忽視了聾人在獨特的語境文化之下，以及與聽人文化的長期摩擦與交融所產生的獨特景觀。因此我們2020年開始，開啟了以聾人和聽障族群為主體的創作計畫，創作了以純聽障、聾人族群為主體，討論聽障、聾人族群生命經驗的《在安靜中跳舞》以及以聽、聾人對話，討論語言和身體共感的《Feel Together》。
+而從2023年開始，我們開始重新思考我們除了創作專門給聾人看的演出之外，有沒有什麼樣的形式可以更好的展現聽、聾在同樣的故事中共同的存在，並且同時展現出不同的觀點？有沒有可能藉由這樣的形式更延伸「共融」的美學？因此開始了《聽見你的聲音》手、口語雙語劇本創作計畫。
+在這個計畫中，我們將主角設定為兩名，一名是聾人的手語使用人士高中生「大樹」，以第一視角為觀點說他努力想要成為作家的故事。另一名是完全不會手語的年輕聽人作家「逸翔」。兩人因為文學而交會，卻因為語言而分隔。我們同時交融這兩位主角的視角，訴說一場在青少年的心裡關於「友誼」、「愛情」和「自我定位」的困境，期待可以創造一個劇場演出，藉由這個作品讓聽聾人都能夠不用藉用任何翻譯，直接感受角色的情感和困惑，並且在同一個故事裡同時存在兩個觀點，讓聽人、聾人能夠在同一個劇場裡看同一個故事。藉此以「語言」的異同隱喻我們之間的異同，是來自於語言的不通？還是來自於對於自我和他人的不理解？並由此想像更多理解的可能。
+
+再次確認，不要有抄任何樣板的內容，只取文字風格，內容與主題請從劇本或是會議記錄看到的為主，不要聚焦在上面樣板中的身份與歷史問屜，要根據劇本或會議記錄的內容去發想劇本裡本身可能內含的主題。
+
+已知欄位：${JSON.stringify(ctx,null,2)}
+可引用之會議記錄：${ctx.minutes?.slice(0,2000)||''}
+${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
+`.trim();
+
+  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.35});
+}
+
+async function gen_workDescription(opts={}){
+  const ctx = buildCommonContext();
+  const sys = `你是劇場企劃，輸出繁體中文；避免虛構細節。`;
+  const ask = `
+請參考以下文字風格、格式與字數（不要參考內容，內容以劇本與會議記錄與其他參考資料為主），不列點生成「作品介紹」與「執行方式」（含A、演出形式；B、演出特色），總字數一定要達2000字以上：
+（1）作品介紹
+
+《洋基之子》故事開始於麥可住在美國的童年，美國人父親與台灣人母親從麥可小時候關係就持續的惡化。父親的暴躁與母親的淚水成為他童年的主要記憶。麥可在父母分開後，被母親帶回台灣，寄住在母親的父母家。他在台灣生活，因為膚色與血統而遭受排擠與歧視。
+隨著成長，麥可對棒球的熱愛成為他唯一的出口，但也在社會與種族壓力下逐漸失去方向。他受到日籍投手伊良部秀輝的啟發，努力模仿他的風格，希望透過棒球證明自己。然而，因為膚色和血統問題，他無法成為台灣的國手。他最終發現母親已在日本另組家庭並隱瞞他的存在，對此感到深深的背叛。
+在尋找認同的過程中，他學習日語並前往日本，試圖與母親重逢。但當他終於見到母親時，卻遭到冷漠拒絕，陷入孤獨與失落。他最終選擇前往美國尋找父親的蹤跡，期望藉此完成身份認同之旅。然而，他到達美國後才發現父親已去世，連依親移民的機會也失去了。他寄希望於以愛情建立新生活，但再次因文化與身份問題而失敗。
+最後麥可陷入對自身價值的質疑，他的童年偶像伊良部秀輝在棒球場上的失敗，成為他人生困境的隱喻。麥可試圖在異鄉重建生活，透過回憶與現實的交織，探索「家」與「愛」的真正意義。
+
+劇本節錄：
+
+麥可：阿嬤一樣，什麼都沒說。但在那一天晚上，阿嬤幫我打包行李。我的東西不多，只有幾件衣服，還有一頂洋基隊的帽子，阿嬤問我帽子要不要丟了，我跟她說，我想要帶著。
+女聲：（唱〈雨夜花〉日文版。）
+雨の降る　夜に　咲いてる　花は
+風に　吹かれて　ほろほろ　落ちる
+麥可：阿嬤也唱了這首歌，但我從來不知道那是什麼語言。如果那是愛的語言，為什麼Mommy唱完之後，就把我丟下？如果這是愛的語言，為什麼阿嬤唱完，就把我送到球隊？
+
+
+（2）執行方式
+我們這次「《洋基之子》台文故事劇場演出計畫」的演出將會以台語作為主要的語言，搭配華語、日語與英語不同語言的混雜來呈現台灣複雜的認同問題。演出的劇本內容將會有一個主要角色，麥可，以及兩位敘述者，三個人共同帶領觀眾從1980年代，隨著麥可從美國回來台灣，並且長大開始加入棒球隊，再到他學日文並且到日本尋找母親，以及到最後來到父親的家鄉紐約。
+在這些過程中，觀眾透過演員在語言和簡單的肢體，扮演不同的情境中的角色，在快速切換中完成不同場景的想像，並且進入到麥可內心的掙扎。
+
+A.演出形式
+
+以台語為主的多語敘事台灣編年史
+在《洋基之子》，台語不只是一種語言，更是與自我文化認同緊緊綁在一起的，在這個作品，我們將會以主角麥可的一生，貫穿台灣從八零年代到兩千年代的歷史，並且藉由他與在戰後在台美國軍人的父親、台灣母親以及經歷日治時期的外公外婆的互動，穿越台灣多重殖民的經驗，展現出麥可成長環境的多語性，展現出了台灣複數文化並存的景象。這樣的創作希望能打破以華文文中心的歷史敘事方式，而展現小人物生命經驗中多語敘事的文化景觀。
+
+角色的多重扮演與敘事
+《洋基之子》故事中，主角麥可從小被父母親拋棄，從小學開始加入棒球隊，以及長大後開啟到日本、美國追尋自己的旅程。而這整個故事將會以三名演員進行呈現，其中兩名表演者分別扮演所有麥可在人生路上所遇到的角色，同時也敘事麥可在這些經歷中的故事。而一名表演者則扮演麥可，以聲音和肢體表的不同呈現，展現麥可的不同階段，以及心中的獨白，讓觀眾好像置身於麥可的心裡空間之中。
+
+空間與敘事的共同想像
+《洋基之子》的故事1970年代末期的台灣開始，穿越了1980的台灣鄉村、90年代的日本，並且最後到了紐約。在多元場景交錯的呈現下，我們將會使用極簡的空間設置呈現不同的場景，搭配演員的敘事，以及物件、光影和舞台空間的使用，創造出故事中不同場景，包含學校、棒球場、紐約街道等等。讓觀眾藉由劇場所創造出來的故事空間，以想像進入到敘事之中。
+
+麥可腦內的雜音與大量聲景的堆疊創造複數聲景
+在聲音設計上，《洋基之子》將會使用大量的聲景(soundscape)搭配空間質地的轉換來創造故事中不同的場景。也在不同時代、空間聲景的聲景中，加入低鳴的混音創造出麥可腦中不同記憶片段的混雜意象，創造複數時空在劇場同時進行的效果。並且將麥可所遭遇不同的角色，使用音響系統做不同的聲音質地變化，並透過大量的音效來創造不同場景的想像。
+
+B.演出特色
+ 語言作為故事中重要主題
+《洋基之子》以語言的多樣性作為核心，讓語言不僅是交流工具，更是一種行動形式，蘊含隱性的權力結構與暴力。本劇透過主人公麥可的經歷，展示語言如何在不同文化中象徵認同、權威與排擠。例如，母親在離開麥可前，以《雨夜花》這首歌來作為道別，在麥可的印象中台語成為了一種離別的語言，而《雨夜花》在麥可的外婆以日文唱這首歌安撫麥可，讓他對於日文的語言產生了一種愛的氛為。同時，劇中融合了台語、英語、日語及國語，刻畫麥可如何在多元語言環境中掙扎與適應，展現台灣在文化交織中的集體心理。語言的選擇與使用，既是麥可行動的手段，也是他面對身份認同衝突的戰場，象徵著社會對混血兒身份的異化與壓迫。
+ 棒球牽起不同年代觀眾的記憶，反思自我身份認同
+棒球作為劇中重要的象徵，串聯起台灣不同時代觀眾的共同記憶，承載深厚的情感與歷史意涵。劇情中的棒球情節既喚起人們對過去國球榮耀的回憶，也揭示了運動背後的複雜文化脈絡。棒球不僅是麥可的夢想，也是他試圖證明自己價值與尋找歸屬的象徵。從麥可模仿日籍偶像伊良部秀輝、去日本學日文想要尋求更好的訓練，再到他前往美國尋求身份認同，棒球承載了麥可的希望與失落，反映台灣在日、美文化影響下的自我定位與掙扎。觀眾在這個過程中，既能感受到個人與集體記憶的共鳴，也能思考自己對身份與文化的認知。
+以「空的空間」建構觀眾想像
+演出特別採用簡約的舞台設計，以「空的空間」作為空間的形式，刺激觀眾的主動想像，營造一種開放的敘事氛圍。劇中的場景透過演員的語言與動作快速切換，僅依賴少量道具與燈光變化，將觀眾的注意力集中在角色內心的掙扎與情感轉折上。例如，麥可回憶童年的家庭後院場景、母親的哭聲與父親的棒球名言等等，全憑空間的留白讓觀眾自行填補情境，進一步代入劇情的情感張力。「空的空間」不僅降低物理場景的具象化，還提供更多層次的詮釋可能性，讓觀眾在每個場景中探索故事背後更深層的意涵與寓意。
+
+
+已知欄位：${JSON.stringify(ctx,null,2)}
+會議記錄重點：${ctx.minutes?.slice(0,2000)||''}
+${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
+`.trim();
+  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.35});
+}
+
+async function gen_team(opts={}){
+  const ctx = buildCommonContext();
+  const sys = `你是製作企劃，輸出繁體中文。若資料不足，保留表格並以「待補」或記錄中的可能人選（加註可能）填入。表格用 Markdown。`;
+  const ask = `
+請生成「創作與製作團隊」：
+- 主要人員名單與職稱（表格：姓名｜職務｜簡介 50–80 字｜代表作）
+- 顧問與合作單位（若有）
+請從會議記錄提取或推測可能人選並標註（可能），不足者以「待補」。
+
+已知欄位：${JSON.stringify(ctx,null,2)}
+會議記錄：${ctx.minutes?.slice(0,2000)||''}
+${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
+`.trim();
+  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.3});
+}
+
+async function gen_schedule(opts={}){
+  const ctx = buildCommonContext();
+  const sys = `你是劇團計劃書寫手，輸出繁體中文`;
+  const ask = `
+請參考以下文字風格、格式與字數（不要參考內容，內容以劇本與會議記錄與其他參考資料為主），不列點生成「計畫期程」，如果沒有跨年度，不用以第一年第二年列點寫：
+第一年：文本發展與讀劇呈現
+第一年的主要目標是完成文本創作、台語翻譯與初步排練，確保劇本的台語版本準確呈現角色與故事情感。同時透過讀劇工作坊，幫助演員熟悉台語語調與發音，訓練語言表現力。音樂設計與視覺概念初步加入，確保故事的整體氛圍一致性。年底透過兩場讀劇演出進行實際測試，蒐集觀眾與專業回饋，為文本進一步修正與正式製作提供方向，奠定第二年完整演出的基礎。
+五月至六月：文本創作與發展
+這段時間主要是編劇針對故事核心跟結構進行創作，把角色的背景和情感慢慢鋪陳出來，還會加入台語跟多語言元素的設計，讓故事更有層次。這是整個計畫的基礎階段，為後續的翻譯和排練鋪路。
+七月至十月：台語文本翻譯與改寫
+編劇、導演會和台語指導楊書楷一起，把初稿翻成台語版本，過程中還會調整台詞讓它更符合台語使用的自然感，增加多語言間的衝突感跟戲劇效果，讓文本更有張力。
+七月至十月：讀劇工作坊
+演員們會參加讀劇工作坊，特別針對台語的口氣和發音來訓練。透過這樣的反覆練習，不只讓演員更熟悉台詞，還能讓他們的角色詮釋更貼近劇本需要的感覺。
+十一月：讀劇排練與視覺概念
+開始正式的讀劇排練，這時候音樂設計也會加入，讓整體氛圍更完整。導演會帶領團隊討論視覺呈現，包含舞台的燈光、道具的搭配，為未來正式演出定下風格基調。
+十二月：讀劇演出與檢討
+12月20日和21日會各有一場讀劇演出，觀眾跟專家都會來看，演出結束後還會開檢討會，把回饋整理起來，作為改進的依據。另外，這時候空間設計的初稿也會完成，為第二年的正式演出奠定基礎。
+第二年：正式演出
+第二年的目標是以第一年的成果為基礎，完成正式排練與宣傳，以及空間設計、燈光、音樂等製作細節全面定稿。最終於五月在兩廳院實驗劇場舉行四場正式演出。
+一月：空間設計與宣傳規劃
+空間設計會在這個月確定下來，導演跟設計團隊也會進行最後的細節確認。宣傳部分也會同步啟動，拍攝宣傳照來做視覺素材，增加觀眾對演出的期待感。
+二月：排練與宣傳啟動
+這個月演員會正式開始排練，導演也會全程帶領大家進一步打磨表演細節。宣傳活動全面展開，像是社群媒體推廣跟票務資訊發布，讓更多人知道這齣戲。
+三月至四月：排練與設計定稿
+這段時間會進行更密集的排練，燈光、音效、服裝等設計也會完成最後定稿。所有部門密切合作，確保每個細節都到位，為演出做好萬全準備。
+五月：整排與正式演出
+正式演出前會安排三次完整的整排，確認所有表演、燈光、音樂和舞台設計的配合度。5月8日至10日將在兩廳院實驗劇場舉行四場演出，為這次計畫畫下圓滿的句點。
+
+已知欄位：${JSON.stringify(ctx,null,2)}
+會議記錄：${ctx.minutes?.slice(0,2000)||''}
+${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
+`.trim();
+  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.3});
+}
+
+async function gen_tech(opts={}){
+  const ctx = buildCommonContext();
+  const sys = `你是技術統籌。輸出繁體中文，條列＋表格混合皆可；未定案之項目列「可行方案＋成本帶（粗估）」；沒有就省略。`;
+  const ask = `
+請生成「技術需求與舞台配置」：
+- 舞台與座位（鏡框／黑盒；觀眾數；可變配置）
+- 燈光／音響／投影／特別需求（如多語字幕、台語發音比例）
+- 無障礙與共融設計（輪椅席、導聆、字幕、口述影像等—若尚未定案，列出可行方案＋成本帶；無則免）
+
+已知欄位：${JSON.stringify(ctx,null,2)}
+會議記錄：${ctx.minutes?.slice(0,2000)||''}
+${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
+`.trim();
+  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.3});
+}
+
+async function gen_marketing(opts={}){
+  const ctx = buildCommonContext();
+  const sys = `你是行銷企劃。輸出繁體中文。`;
+  const ask = `
+請參考以下文字風格、格式與字數（不要參考內容，內容以劇本與會議記錄與其他參考資料為主），列出以下五點生成「行銷與票務策略」，每點至少150字：
+建立故事與品牌認同
+目標： 讓觀眾對《洋基之子》這個作品產生強烈的情感連結，了解背後的歷史與文化背景。
+創意圖文： 利用具視覺鮮明的宣傳海報，呈現多語言、跨文化的核心價值，配合對應角色的情感宣言與故事縮影，讓觀眾提前感知作品的多元層面。
+網站與社交媒體平台： 設立專屬網站或專頁，定期發布劇組製作進度、故事背景介紹以及幕後花絮，並設計有趣的互動活動，增加與觀眾的互動。
+
+建立社群媒體宣傳
+目標： 借助社群媒體的平台力量，提高曝光率並加強觀眾的參與感。
+多平台推廣： 在Instagram、Facebook等平台上，開設專屬帳號或標籤（如#洋基之子 #尋找自我 #多語台灣），定期發布演出資訊、人物介紹、語言與棒球的相關小故事或互動內容。
+影片花絮： 利用製作過程中的幕後花絮或演員練習的片段，展現劇本的多層面性及演員的投入，吸引更多觀眾關注。
+藝文網紅與podcast合作： 邀請文化、戲劇和台灣歷史背景相關領域的劇評或專業人士進行宣傳。這些影響者可以分享他們對作品的看法，並將其與自己的觀眾群體分享。
+
+合作與跨界行銷
+目標： 透過跨界合作引起更多人群的關注，擴大宣傳範圍。
+文化合作： 與台灣文化機構、語言學會或體育組織合作，推出聯名活動或折扣票價等促銷活動。例如，可以與台灣棒球協會合作，將棒球與文化結合，吸引更多棒球迷參與演出。
+學校與社區合作： 透過與學校或社區合作，將《洋基之子》的文化議題帶進教育與討論，設計特別場次或優惠票價，吸引學生與年輕觀眾群。
+
+提前開放票務與促銷
+目標： 提早吸引觀眾購票，藉由特殊票價及限量福利增加觀眾的購票意願。
+早鳥票與團體票： 提供早鳥票優惠，或者對於學生、文化工作者、棒球迷等群體推出特別票價。團體票可以與學校或機構合作，吸引更多人提前訂票。
+限量紀念商品： 提供以劇作為靈感的限量紀念商品，如印有劇中台語、日語或棒球元素的應援小周邊（如手環、加油棒、吊飾）等，作為觀眾的回饋，並加強品牌的識別度。
+
+線上與線下活動
+   目標： 透過多種形式的活動增加觀眾參與感，進一步擴大影響力。
+線上座談會或讀劇分享： 在演出前舉辦座談會，邀請編劇、導演及演員與觀眾對話，探討劇中涉及的文化議題、語言設計及身份認同等問題，進一步引發觀眾對劇情的思考與討論。
+現場互動活動： 在演出期間安排現場互動，如小型的棒球挑戰賽或語言遊戲，讓觀眾更深刻地體驗劇情中的文化衝突與認同掙扎。
+
+
+
+已知欄位：${JSON.stringify(ctx,null,2)}
+會議記錄：${ctx.minutes?.slice(0,2000)||''}
+${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
+`.trim();
+  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.35});
+}
+
+async function gen_budget(opts={}){
+  const ctx = buildCommonContext();
+  const sys = `你是製作會計。輸出繁體中文，表格用 Markdown：項目｜細目｜單價×數量｜小計｜備註；若會議記錄有總預算或單項預算請代入，其餘標「待補」。`;
+  const ask = `
+請生成「預算與資源配置（試算表）」：
+- 人事（導演、演員、設計、舞監、製作、行政）
+- 場地與技術（場租、燈音投、運輸保險）
+- 視覺影像／宣傳（攝影、設計、廣告）
+- 行政雜支（合約、審計、雜支）
+- 預備金（5–10%）
+若有多場地／多檔期，請標註差異。
+
+已知欄位：${JSON.stringify(ctx,null,2)}
+會議記錄：${ctx.minutes?.slice(0,2200)||''}
+${opts?.suggestion ? `\n【修改建議（首次生成時依此方向撰寫）】：\n${opts.suggestion}\n` : ''} 
+`.trim();
+  return await openaiChat([{role:'system',content:sys},{role:'user',content:ask}],{temperature:0.3});
+}
+
+// ======= Drive 基本操作 =======
+async function gfetch(url, opts={}){
+  if(!accessToken) throw new Error('尚未取得 Google Access Token');
+  const res = await fetch(url, {
+    ...opts,
+    headers:{
+      'Authorization': `Bearer ${accessToken}`,
+      ...(opts.headers||{})
+    }
+  });
+  if(!res.ok){
+    const t = await res.text();
+    throw new Error('Google API 錯誤：'+t);
+  }
+  return res;
+}
+async function findFolderByName(name, parentId){
+  const q = encodeURIComponent(`name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and '${parentId||'root'}' in parents and trashed=false`);
+  const res = await gfetch(`${GDRIVE_FILES}?q=${q}&fields=files(id,name)`);
+  const j = await res.json();
+  return j.files?.[0] || null;
+}
+
+// =================== Google Tasks：清單與代辦 ===================
+const GTASKS_BASE = 'https://tasks.googleapis.com/tasks/v1';
+
+// 共用 fetch（和 gfetch 一樣帶 token）
+async function tfetch(url, opts={}) {
+  if (!accessToken) throw new Error('尚未取得 Google Access Token');
+  const res = await fetch(url, {
+    ...opts,
+    headers: { 'Authorization': `Bearer ${accessToken}`, ...(opts.headers||{}) }
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error('Google Tasks API 錯誤：' + t);
+  }
+  return res;
+}
+
+// 取得或建立「年度,作品名稱」專屬清單（例：2026,洋基之子）
+async function findOrCreateTaskList(listName) {
+  // 先列出全部清單找有沒有同名
+  const res = await tfetch(`${GTASKS_BASE}/users/@me/lists?maxResults=200`);
+  const j = await res.json();
+  const hit = (j.items || []).find(x => x.title === listName);
+  if (hit) return hit;
+
+  // 建立
+  const createRes = await tfetch(`${GTASKS_BASE}/users/@me/lists`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: listName })
+  });
+  return await createRes.json();
+}
+
+// 建立單一 task
+async function createTask(taskListId, { title, notes, dueISODate }) {
+  // Tasks 的 due 需要 RFC3339 datetime；這裡設成 UTC 零點
+  const due = dueISODate ? `${dueISODate}T00:00:00.000Z` : undefined;
+  const body = { title: title || '(未命名)', notes: notes || undefined, due };
+  const res = await tfetch(`${GTASKS_BASE}/lists/${encodeURIComponent(taskListId)}/tasks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return await res.json();
+}
+
+// 批次建立（分批避免節流）
+async function createManyTasks({ listName, tasks, chunkSize = 25, delayMs = 200 }) {
+  const list = await findOrCreateTaskList(listName);
+  const created = [];
+  const failed = [];
+
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    try {
+      const one = await createTask(list.id, t);
+      created.push(one);
+    } catch (e) {
+      failed.push({ input: t, error: e.message });
+    }
+    // 節流：每 chunkSize 筆停一下
+    if ((i + 1) % chunkSize === 0) {
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+  return { list, created, failed };
+}
+
+
+// ★依「檔名完全相同」找一個檔（不限資料夾）
+async function findFileByExactName(name) {
+  const q = encodeURIComponent(`name = '${name}' and trashed=false`);
+  const url = `${GDRIVE_FILES}?q=${q}`
+    + `&fields=files(id,name,mimeType)`
+    + `&includeItemsFromAllDrives=true&supportsAllDrives=true`;
+  const res = await gfetch(url);
+  const j = await res.json();
+  return j.files?.[0] || null;
+}
+
+
+async function createFolder(name, parentId){
+  const meta = { name, mimeType: 'application/vnd.google-apps.folder', parents: parentId ? [parentId] : undefined };
+  const res = await gfetch(GDRIVE_FILES,{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(meta) });
+  return await res.json();
+}
+async function findOrCreateFolder(name, parentId){
+  let f = await findFolderByName(name, parentId);
+  if(f) return f;
+  return await createFolder(name, parentId);
+}
+async function listFilesByKeyword(keyword){
+  const q = encodeURIComponent(`name contains '${keyword}' and trashed=false`);
+  const url = `${GDRIVE_FILES}?q=${q}`
+    + `&fields=files(id,name,mimeType,parents,shortcutDetails(targetId,targetMimeType))`
+    + `&includeItemsFromAllDrives=true&supportsAllDrives=true`;
+  const res = await gfetch(url);
+  return await res.json();
+}
+
+// 取得文件目前的 endIndex（最後一個元素的 endIndex）
+async function getDocEndIndex(docId){
+  const res = await gfetch(`${GDOCS}/${docId}`);
+  const doc = await res.json();
+
+  // body.content 通常最後一個元素的 endIndex 就是整份文件的結尾
+  const content = doc?.body?.content || [];
+  if (!content.length) return 1;
+
+  const last = content[content.length - 1];
+  const endIndex = (typeof last.endIndex === 'number') ? last.endIndex : 1;
+  return endIndex || 1;
+}
+
+// ======= 建立作品資料夾樹狀結構（依需求）=======
+async function ensureFolderTree(rootId, yearStr, workTitle){
+  // 年度
+  const yearFolder = await findOrCreateFolder(yearStr, rootId);
+  YEAR_FOLDER_ID = yearFolder.id;
+
+  // 作品
+  const workFolder = await findOrCreateFolder(workTitle, YEAR_FOLDER_ID);
+  WORK_FOLDER_ID = workFolder.id;
+
+  // 第三層：製作 / 共用資料夾
+  const prodFolder     = await findOrCreateFolder('製作', WORK_FOLDER_ID);
+  const sharedFolder   = await findOrCreateFolder('共用資料夾', WORK_FOLDER_ID);
+
+  // 製作底下
+  const planFolder     = await findOrCreateFolder('計畫書', prodFolder.id);
+  await findOrCreateFolder('製作會議記錄', prodFolder.id);
+
+  const grantFolder    = await findOrCreateFolder('補助', prodFolder.id);
+  await findOrCreateFolder('文化局', grantFolder.id);
+  await findOrCreateFolder('國藝會', grantFolder.id);
+  await findOrCreateFolder('文化部', grantFolder.id);
+  await findOrCreateFolder('其他',   grantFolder.id);
+
+  const financeFolder  = await findOrCreateFolder('財務', prodFolder.id);
+  await findOrCreateFolder('發票', financeFolder.id);
+
+  await findOrCreateFolder('宣傳', prodFolder.id);
+  await findOrCreateFolder('售票', prodFolder.id);
+  await findOrCreateFolder('觀眾回饋', prodFolder.id);
+
+  const closeoutFolder = await findOrCreateFolder('結案', prodFolder.id);
+  await findOrCreateFolder('文化局', closeoutFolder.id);
+  await findOrCreateFolder('國藝會', closeoutFolder.id);
+  await findOrCreateFolder('文化部', closeoutFolder.id);
+  await findOrCreateFolder('其他',   closeoutFolder.id);
+
+  // 共用資料夾底下
+  await findOrCreateFolder('劇本', sharedFolder.id);
+  await findOrCreateFolder('排練紀錄', sharedFolder.id);
+  await findOrCreateFolder('會議記錄', sharedFolder.id);
+
+  const techFolder = await findOrCreateFolder('技術資料', sharedFolder.id);
+  await findOrCreateFolder('燈光', techFolder.id);
+  await findOrCreateFolder('舞台', techFolder.id);
+  await findOrCreateFolder('音樂/音效', techFolder.id);
+  await findOrCreateFolder('影像', techFolder.id);
+  await findOrCreateFolder('舞監', techFolder.id);
+  await findOrCreateFolder('舊作資料', techFolder.id); // 只建立資料夾，不匯入任何捷徑
+
+  const recordFolder = await findOrCreateFolder('演出紀錄', sharedFolder.id);
+  await findOrCreateFolder('靜態', recordFolder.id);
+  await findOrCreateFolder('動態', recordFolder.id);
+
+  await findOrCreateFolder('場館資料', sharedFolder.id);
+  await findOrCreateFolder('時程', sharedFolder.id);
+
+  // 讓其它程式知道「計畫書」在哪裡
+  DOCS_OUT_FOLDER_ID = planFolder.id;
+
+  return { yearFolderId: YEAR_FOLDER_ID, workFolderId: WORK_FOLDER_ID, planFolderId: DOCS_OUT_FOLDER_ID };
+}
+
+
+
+// ======= Docs 建立與覆寫 =======
+async function createDoc(title){
+  const res = await gfetch(GDOCS,{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({title}) });
+  const doc = await res.json();
+  // 存到 作品/製作/計畫書
+  const parentId = DOCS_OUT_FOLDER_ID || WORK_FOLDER_ID || 'root';
+  await gfetch(`${GDRIVE_FILES}/${doc.documentId}?addParents=${parentId}&removeParents=root&fields=id,parents&supportsAllDrives=true`, { method:'PATCH' });
+  return doc.documentId;
+}
+
+async function overwriteDoc(docId, content){
+  // 1) 先抓文件實際 endIndex
+  const endIndex = await getDocEndIndex(docId);
+
+  // 2) 組 requests：
+  //    - 文件長度 > 2 才刪除（避免空範圍）
+  //    - 再在 index:1 插入新文字
+  const requests = [];
+
+  if (endIndex > 2) {
+    requests.push({
+      deleteContentRange: {
+        range: {
+          segmentId: null,
+          startIndex: 1,
+          endIndex: endIndex - 1 // endIndex 為排他；刪到最後一個內容前即可
+        }
+      }
+    });
+  }
+
+  // 確保最後有斷行
+  const textToInsert = content?.endsWith('\n') ? content : (content + '\n');
+
+  requests.push({
+    insertText: {
+      location: { index: 1 },
+      text: textToInsert
+    }
+  });
+
+  await gfetch(`${GDOCS}/${docId}:batchUpdate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests })
+  });
+}
+
+// ======= 匯出 PDF 並存回 Drive =======
+async function exportDocToPdfAndSave(docId, outName){
+  const exportRes = await gfetch(`${GDRIVE_FILES}/${docId}/export?mimeType=application/pdf`);
+  const blob = await exportRes.blob();
+  const parentId = DOCS_OUT_FOLDER_ID || WORK_FOLDER_ID || 'root'; // 製作/計畫書
+  const meta = { name: outName || '計劃書輸出.pdf', parents:[parentId] };
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(meta)],{type:'application/json'}));
+  form.append('file', blob);
+  const res = await fetch(`${GDRIVE_UPLOAD}?uploadType=multipart`,{ method:'POST', headers:{'Authorization': `Bearer ${accessToken}`}, body: form });
+  if(!res.ok){ const t = await res.text(); throw new Error('上傳 PDF 失敗：'+t); }
+  const j = await res.json();
+  return j.id;
+}
+
+
+// ======= 將各段合成完整文件骨架（未生成者顯示「待補」） =======
+function buildFullDoc(){
+  const year = document.getElementById('workYear').value.trim();
+  const title = document.getElementById('workTitle').value.trim();
+  const venue = document.getElementById('venue').value.trim();
+  const dates = document.getElementById('dates').value.trim();
+  const adjustments = document.getElementById('adjustments').value.split(',').map(s=>s.trim()).filter(Boolean).join('、');
+
+  const sec = (k, heading)=> `## ${heading}\n${(SECTIONS[k]||'(待補)')}\n\n`;
+
+  return (
+`# ${title || '（未命名）'}（${year || 'YYYY'}）計劃書
+
+**場地**：${venue||''}  
+**檔期**：${dates||''}  
+**本輪調整重點**：${adjustments||''}
+
+${sec('originGoals','計畫緣起與目標')}
+${sec('workDescription','作品與內容說明')}
+${sec('team','創作與製作團隊')}
+${sec('schedule','製作期程（甘特表）')}
+${sec('tech','技術需求與舞台配置')}
+${sec('marketing','行銷與票務策略')}
+${sec('budget','預算與資源配置（試算表）')}
+`
+  );
+}
+
+
+function filterOldList(){
+  const q = (document.getElementById('oldSearch')?.value || '').trim().toLowerCase();
+  const rows = document.querySelectorAll('#renameTable tbody tr');
+  rows.forEach(r=>{
+    const name = r.querySelector('td:first-child span:nth-of-type(1)')?.textContent.toLowerCase() || '';
+    const sugg = r.querySelector('td:nth-child(2) input')?.value.toLowerCase() || '';
+    r.style.display = (q==='' || name.includes(q) || sugg.includes(q)) ? '' : 'none';
+  });
+}
+
+// 初始掛上 input 事件（DOM 皆已存在時會成功；若先載入也無妨）
+document.addEventListener('DOMContentLoaded', ()=>{
+  const s = document.getElementById('oldSearch');
+  if(s) s.addEventListener('input', filterOldList);
+});
+
+
+
+// ======= 事件繫結：登入/登出/解析/命名/佈署/生成/寫入/匯出 =======
+document.getElementById('btnGoogleAuth').addEventListener('click', ()=> initGoogle());
+document.getElementById('btnLogout').addEventListener('click', ()=> logout());
+
+document.getElementById('btnParse').addEventListener('click', async ()=>{
+  try{
+    const f = document.getElementById('minutesFile').files?.[0];
+    if(!f) return alert('請選擇會議記錄檔（建議 .txt/.md，亦支援 .docx/.pdf）');
+    log(`讀取會議記錄（${f.name}）…`);
+    const raw = await readFileAsText(f);
+    const preview = safeSliceForLLM(raw, 5000);
+    document.getElementById('minutesPreview').value = preview;
+
+    const ext = await extractFromMinutes(raw);
+    log('抽取完成：'+JSON.stringify(ext));
+    if(ext.title) document.getElementById('workTitle').value = ext.title;
+    if(ext.year) document.getElementById('workYear').value = ext.year;
+    if(ext.venue) document.getElementById('venue').value = ext.venue;
+    if(ext.dates) document.getElementById('dates').value = ext.dates;
+    if(ext.adjustments) document.getElementById('adjustments').value = (ext.adjustments||[]).join(', ');
+  }catch(e){
+    log(e.message,'err');
+    alert(e.message);
+  }
+});
+
+// 舊作掃描/命名
+document.getElementById('btnScanOld').addEventListener('click', async()=>{
+  const btn = document.getElementById('btnScanOld');
+  const original = btn.textContent;
+  btn.disabled = true; btn.classList.add('busy'); btn.textContent = '掃描中…';
+
+  try{
+    const title = document.getElementById('workTitle').value.trim();
+    if(!title){
+      alert('請先輸入作品名稱');
+      return;
+    }
+    log('掃描舊作…');
+
+    const j = await listFilesByKeyword(title);
+
+    const tbody = document.querySelector('#renameTable tbody');
+    tbody.innerHTML='';
+
+    (j.files||[]).forEach(f=>{
+      // 建立索引（後續 fetchDriveFileText 用）
+      DRIVE_FILE_INDEX[f.id] = {
+        id: f.id,
+        name: f.name,
+        mimeType: f.mimeType,
+        shortcutDetails: f.shortcutDetails || null
+      };
+
+      const guessYear = /20\d{2}/.exec(f.name)?.[0]||'';
+      const kind = f.mimeType.includes('folder')? '資料夾':'檔案';
+      const ext = f.name.includes('.')? f.name.split('.').pop():'';
+      const suggested = `${title}_${guessYear||'YYYY'}_${kind==='資料夾'?'資料':'檔'}_v01${ext?'.'+ext:''}`;
+
+      const tr = document.createElement('tr');
+      const checkboxId = `oldpick-${f.id}`;
+      tr.innerHTML = `
+        <td>
+          <label style="display:flex;gap:8px;align-items:center">
+            <input type="checkbox" id="${checkboxId}" data-id="${f.id}" />
+            <span>${f.name}</span>
+            <span class="mini" style="opacity:.7">(${f.mimeType}${f.shortcutDetails?' → '+f.shortcutDetails.targetMimeType:''})</span>
+          </label>
+        </td>
+        <td><input data-id="${f.id}" value="${suggested}"/></td>
+        <td class="mini">待執行</td>
+      `;
+      tr.querySelector('input[type="checkbox"]').addEventListener('change', (e)=>{
+        const id = e.target.dataset.id;
+        if (e.target.checked) SELECTED_OLD_FILE_IDS.add(id);
+        else SELECTED_OLD_FILE_IDS.delete(id);
+      });
+      tbody.appendChild(tr);
+    });
+
+    // 重置搜尋框並套用一次篩選
+    const search = document.getElementById('oldSearch');
+    if(search){ search.value=''; filterOldList(); }
+
+    log('完成，請檢查命名建議。');
+  }catch(e){
+    log(e.message,'err');
+    alert(e.message);
+  }finally{
+    btn.textContent = '完成 ✓';
+    setTimeout(()=>{ btn.disabled=false; btn.classList.remove('busy'); btn.textContent = original; }, 800);
+  }
+});
+
+document.getElementById('btnApplyRename').addEventListener('click', async()=>{
+  try{
+    const rows = document.querySelectorAll('#renameTable tbody tr');
+    for(const r of rows){
+      const input = r.querySelector('input');
+      const id = input.dataset.id;
+      const newName = input.value.trim();
+      const status = r.querySelector('td:last-child');
+      try{
+        await gfetch(`${GDRIVE_FILES}/${id}?supportsAllDrives=true`, {
+          method:'PATCH',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ name: newName })
+        });
+
+        status.innerHTML = '<span class="ok">已改名</span>';
+      }catch(e){ status.innerHTML = '<span class="err">失敗</span>'; }
+    }
+    log('批次命名完成。');
+  }catch(e){ log(e.message,'err'); }
+});
+
+// 佈署
+document.getElementById('btnDeploy').addEventListener('click', async()=>{
+  const btn = document.getElementById('btnDeploy');
+  const original = btn.textContent;
+  btn.disabled = true; btn.classList.add('busy'); btn.textContent = '執行中…';
+
+  try{
+    const year  = document.getElementById('workYear').value.trim();
+    const title = document.getElementById('workTitle').value.trim();
+    if(!year||!title) { alert('請先輸入 年度 與 作品名稱'); return; }
+
+    // 1) 建資料夾結構
+    const root = await findOrCreateFolder(DRIVE_ROOT_NAME);
+    const { workFolderId, planFolderId } = await ensureFolderTree(root.id, year, title);
+    log('佈署完成，已建立分層資料夾（不匯入舊作捷徑）。');
+
+    // 2) 準備置換變數（提供給模板）
+    const workFolderUrl = `https://drive.google.com/drive/folders/${workFolderId}`;
+    const planFolderUrl = `https://drive.google.com/drive/folders/${planFolderId}`;
+
+    // 3) 讀任務模板（先 Sheet，再 JSON）
+    const templates = await loadTaskTemplates({ title, year, workFolderUrl, planFolderUrl });
+
+    if (!templates.length) {
+      log('【提醒】未找到任務模板（請建立名為「劇團計畫-任務模板」的 Sheet，或同名 JSON）。','warn');
+    } else {
+      // 4) ★強制所有任務都進同一清單：「年度,作品名稱」
+      const listName = `${year},${title}`;
+      const tasks = templates.map(t => ({
+        // 內容維持模板生成，但 listName 不再使用個別值，統一丟到 listName
+        title: t.title,
+        notes: t.notes,
+        dueISODate: t.dueISODate
+      }));
+
+      // 5) 批次建立
+      const { created, failed, list } = await createManyTasks({
+        listName,
+        tasks,
+        chunkSize: 25,
+        delayMs: 200
+      });
+
+      log(`已將 ${created.length} 筆任務建立到清單「${list.title}」；失敗 ${failed.length} 筆。`);
+      if (failed.length) log('失敗明細（只印前 3 筆）：\n' + failed.slice(0,3).map(x => `- ${x.input.title}：${x.error}`).join('\n'), 'warn');
+    }
+
+    btn.textContent = '完成 ✓';
+  }catch(e){
+    log(e.message,'err');
+    alert(e.message);
+  }finally{
+    setTimeout(()=>{ btn.disabled=false; btn.classList.remove('busy'); btn.textContent = original; }, 800);
+  }
+});
+
+
+// 綁定每段「生成」與「寫入」
+const genMap = {
+  originGoals: gen_originGoals,
+  workDescription: gen_workDescription,
+  team: gen_team,
+  schedule: gen_schedule,
+  tech: gen_tech,
+  marketing: gen_marketing,
+  budget: gen_budget
+};
+
+document.querySelectorAll('[data-gen]').forEach(btn=>{
+  btn.addEventListener('click', async ()=>{
+    const secKey = btn.dataset.gen;
+
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '生成中…';
+
+    try{
+      // 讀取建議與現有內容
+      const suggestion = (document.getElementById(`sug-${secKey}`)?.value || '').trim();
+      const currentTextArea = document.getElementById(`sec-${secKey}`);
+      const existing = (currentTextArea?.value || SECTIONS[secKey] || '').trim();
+
+      // 將勾選的舊作抓文字，暫存（供模型參考）
+      CURRENT_EXTRA_MINUTES = await gatherSelectedOldTexts(15000);
+
+      let content;
+
+      if (suggestion && !shouldRewrite(suggestion) && existing) {
+        // 有建議＋已有內容 → 做「精修 revise」
+        log(`依建議微調「${secKey}」…`);
+        content = await reviseSection(secKey, existing, suggestion);
+      } else {
+        // 首次生成 或 明確要求重寫
+        const opts = { suggestion };
+        log(`生成/重寫「${secKey}」…（含勾選舊作 ${SELECTED_OLD_FILE_IDS.size} 筆）`);
+        content = await genMap[secKey](opts);
+      }
+
+      // 清掉暫存，避免影響下一次
+      CURRENT_EXTRA_MINUTES = '';
+
+      SECTIONS[secKey] = content;
+      if(currentTextArea) currentTextArea.value = content;
+      log(`完成：${secKey}`);
+
+      btn.textContent = '已生成 ✓';
+      setTimeout(()=>{ btn.textContent = originalText; btn.disabled = false; }, 1000);
+    }catch(e){
+      CURRENT_EXTRA_MINUTES = '';
+      log(e.message,'err');
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }
+  });
+});
+
+
+document.querySelectorAll('[data-write]').forEach(btn=>{
+  btn.addEventListener('click', async ()=>{
+    const secKey = btn.dataset.write;
+    try{
+      // 以 textarea 內容為準（可以讓你手動修後再寫入）
+      SECTIONS[secKey] = document.getElementById(`sec-${secKey}`).value.trim() || SECTIONS[secKey] || '(待補)';
+      await writeAllToDoc();
+      log(`已將目前各段（含 ${secKey}）寫入 Docs。`);
+    }catch(e){ log(e.message,'err'); }
+  });
+});
+
+document.getElementById('btnWriteDoc').addEventListener('click', async ()=>{
+  const btn = document.getElementById('btnWriteDoc');
+  const original = btn.textContent;
+  btn.disabled = true; btn.classList.add('busy'); btn.textContent = '寫入中…';
+
+  try{
+    // 將畫面上每個 textarea 的內容同步到 SECTIONS
+    Object.keys(SECTIONS).forEach(k=>{
+      const v = (document.getElementById(`sec-${k}`)?.value||'').trim();
+      if(v) SECTIONS[k]=v;
+    });
+    await writeAllToDoc();
+    log('已將目前各段整合寫入 Docs。');
+    btn.textContent = '完成 ✓';
+  }catch(e){
+    log(e.message,'err');
+    alert(e.message);
+  }finally{
+    setTimeout(()=>{ btn.disabled=false; btn.classList.remove('busy'); btn.textContent = original; }, 800);
+  }
+});
+
+
+async function writeAllToDoc(){
+  if(!WORK_FOLDER_ID) return alert('請先執行「建資料夾結構」');
+  const title = document.getElementById('workTitle').value.trim();
+  const year = document.getElementById('workYear').value.trim();
+  const docName = `${title||'未命名'}${year?('_'+year):''}_文化局_計劃書`;
+
+  const full = buildFullDoc();
+  if(!CURRENT_DOC_ID){ CURRENT_DOC_ID = await createDoc(docName); }
+  await overwriteDoc(CURRENT_DOC_ID, full);
+}
+
+// 匯出 PDF
+document.getElementById('btnExport').addEventListener('click', async()=>{
+  const btn = document.getElementById('btnExport');
+  const original = btn.textContent;
+  btn.disabled = true; btn.classList.add('busy'); btn.textContent = '匯出中…';
+
+  try{
+    if(!CURRENT_DOC_ID) { alert('尚未有 Docs 文件，請先寫入一次。'); return; }
+    const title = document.getElementById('workTitle').value.trim();
+    const year = document.getElementById('workYear').value.trim();
+    const outName = `${title||'未命名'}${year?('_'+year):''}_文化局_計劃書.pdf`;
+    const id = await exportDocToPdfAndSave(CURRENT_DOC_ID, outName);
+    log(`PDF 已上傳：${outName}（ID: ${id}）`);
+    btn.textContent = '完成 ✓';
+  }catch(e){
+    log(e.message,'err');
+    alert(e.message);
+  }finally{
+    setTimeout(()=>{ btn.disabled=false; btn.classList.remove('busy'); btn.textContent = original; }, 800);
+  }
+});
+
+</script>
+</body>
+</html>
