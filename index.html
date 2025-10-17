@@ -580,7 +580,8 @@ async function loadTaskTemplatesFromSheet(ctx) {
     .replaceAll('{{title}}', ctx.title || '')
     .replaceAll('{{year}}', ctx.year || '')
     .replaceAll('{{workFolderUrl}}', ctx.workFolderUrl || '')
-    .replaceAll('{{planFolderUrl}}', ctx.planFolderUrl || '');
+    .replaceAll('{{planFolderUrl}}', ctx.planFolderUrl || '')
+    .replaceAll('{{planDocUrl}}', ctx.planDocUrl || '');
 
   const out = [];
   rows.slice(1).forEach(r => {
@@ -620,7 +621,9 @@ async function loadTaskTemplatesFromJson(ctx) {
     .replaceAll('{{title}}', ctx.title || '')
     .replaceAll('{{year}}', ctx.year || '')
     .replaceAll('{{workFolderUrl}}', ctx.workFolderUrl || '')
-    .replaceAll('{{planFolderUrl}}', ctx.planFolderUrl || '');
+    .replaceAll('{{planFolderUrl}}', ctx.planFolderUrl || '')
+    .replaceAll('{{planDocUrl}}', ctx.planDocUrl || '');
+;
 
   return (arr || [])
     .filter(x => String(x.enabled).toLowerCase() === 'true')
@@ -1164,10 +1167,19 @@ async function findOrCreateTaskList(listName) {
 }
 
 // 建立單一 task
-async function createTask(taskListId, { title, notes, dueISODate }) {
-  // Tasks 的 due 需要 RFC3339 datetime；這裡設成 UTC 零點
+async function createTask(taskListId, { title, notes, dueISODate, links }) {
   const due = dueISODate ? `${dueISODate}T00:00:00.000Z` : undefined;
   const body = { title: title || '(未命名)', notes: notes || undefined, due };
+
+  if (Array.isArray(links) && links.length) {
+    // Google Tasks v1 支援 links: [{type:'link', description:'...', link:'...'}]
+    body.links = links.map(l => ({
+      type: l.type || 'link',
+      description: l.description || '',
+      link: l.link || ''
+    }));
+  }
+
   const res = await tfetch(`${GTASKS_BASE}/lists/${encodeURIComponent(taskListId)}/tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1175,6 +1187,7 @@ async function createTask(taskListId, { title, notes, dueISODate }) {
   });
   return await res.json();
 }
+
 
 // 批次建立（分批避免節流）
 async function createManyTasks({ listName, tasks, chunkSize = 25, delayMs = 200 }) {
@@ -1548,16 +1561,22 @@ document.getElementById('btnDeploy').addEventListener('click', async()=>{
     if(!year||!title) { alert('請先輸入 年度 與 作品名稱'); return; }
 
     // 1) 建資料夾結構
-    const root = await findOrCreateFolder(DRIVE_ROOT_NAME);
-    const { workFolderId, planFolderId } = await ensureFolderTree(root.id, year, title);
-    log('佈署完成，已建立分層資料夾（不匯入舊作捷徑）。');
+const root = await findOrCreateFolder(DRIVE_ROOT_NAME);
+const { workFolderId, planFolderId } = await ensureFolderTree(root.id, year, title);
+log('佈署完成，已建立分層資料夾（不匯入舊作捷徑）。');
 
-    // 2) 準備置換變數（提供給模板）
-    const workFolderUrl = `https://drive.google.com/drive/folders/${workFolderId}`;
-    const planFolderUrl = `https://drive.google.com/drive/folders/${planFolderId}`;
+// 1.5) 先在「製作/計畫書」底下建立一份空白 Google Doc，取得 URL 先給任務用
+const draftDocId = await createDoc(`${title}（${year}）計劃書—草稿`);
+CURRENT_DOC_ID = draftDocId;
+const planDocUrl = `https://docs.google.com/document/d/${draftDocId}/edit`;
 
-    // 3) 讀任務模板（先 Sheet，再 JSON）
-    const templates = await loadTaskTemplates({ title, year, workFolderUrl, planFolderUrl });
+// 2) 準備置換變數（提供給模板）
+const workFolderUrl = `https://drive.google.com/drive/folders/${workFolderId}`;
+const planFolderUrl = `https://drive.google.com/drive/folders/${planFolderId}`;
+
+// 3) 讀任務模板（先 Sheet，再 JSON）── 把 planDocUrl 一起傳進去
+const templates = await loadTaskTemplates({ title, year, workFolderUrl, planFolderUrl, planDocUrl });
+
 
     if (!templates.length) {
       log('【提醒】未找到任務模板（請建立名為「劇團計畫-任務模板」的 Sheet，或同名 JSON）。','warn');
@@ -1565,11 +1584,12 @@ document.getElementById('btnDeploy').addEventListener('click', async()=>{
       // 4) ★強制所有任務都進同一清單：「年度,作品名稱」
       const listName = `${year},${title}`;
       const tasks = templates.map(t => ({
-        // 內容維持模板生成，但 listName 不再使用個別值，統一丟到 listName
-        title: t.title,
-        notes: t.notes,
-        dueISODate: t.dueISODate
-      }));
+  title: t.title,
+  notes: t.notes,
+  dueISODate: t.dueISODate,
+  links: t.links   // ★把模板裡的 link1/link2 一起送進去
+}));
+
 
       // 5) 批次建立
       const { created, failed, list } = await createManyTasks({
