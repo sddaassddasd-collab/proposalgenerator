@@ -912,18 +912,33 @@ function applySuggestionBlocks(s = '', suggestion = '') {
 }
 
 async function loadSectionPromptsFromSheet() {
-  if (Object.keys(PROMPT_CACHE).length) return PROMPT_CACHE; // 已載過
-  const f = await findFileByExactName(SECTION_PROMPT_SHEET_NAME);
-  if (!f || f.mimeType !== 'application/vnd.google-apps.spreadsheet') {
-    log(`找不到 Sheet「${SECTION_PROMPT_SHEET_NAME}」，將使用函式內建的預設提示詞。`, 'warn');
-    return PROMPT_CACHE; // 空表示沒載到
-  }
-  const res = await gfetch(`${GDRIVE_FILES}/${f.id}/export?mimeType=text/csv&supportsAllDrives=true`);
-  const csv = await res.text();
-  const rows = parseCSV(csv);
-  if (!rows.length) return PROMPT_CACHE;
+  if (Object.keys(PROMPT_CACHE).length) return PROMPT_CACHE;
 
-  const headers = rows[0].map(h => (h || '').trim().toLowerCase());
+  // 只找真正的「試算表」檔，避免抓到同名 Docs/Slides
+  const f = await findSheetByExactName(SECTION_PROMPT_SHEET_NAME);
+  if (!f) {
+    log(`❗找不到 Sheet「${SECTION_PROMPT_SHEET_NAME}」，將使用內建預設提示詞。`, 'warn');
+    return PROMPT_CACHE;
+  }
+
+  // 匯出第一個分頁的 CSV（Drive 匯出只會給第一分頁）
+  const res = await gfetch(`${GDRIVE_FILES}/${f.id}/export?mimeType=text/csv&supportsAllDrives=true`);
+  let csv = await res.text();
+  csv = csv.replace(/^\uFEFF/, ''); // 去掉檔頭 BOM
+
+  const rows = parseCSV(csv);
+  if (!rows.length) {
+    log('❗分段 Prompts 的 CSV 為空。', 'warn');
+    return PROMPT_CACHE;
+  }
+
+  // 正規化工具：去除零寬字元與奇怪空白
+  const norm = (s) => (s || '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '') // 零寬字元/BOM
+    .replace(/\u00A0/g, ' ')               // NBSP -> space
+    .trim();
+
+  const headers = rows[0].map(h => norm(h).toLowerCase());
   const idx = n => headers.findIndex(h => h === n);
 
   const ikey = idx('key');
@@ -931,18 +946,29 @@ async function loadSectionPromptsFromSheet() {
   const ipmt = idx('prompt');
   const itmp = idx('temperature');
 
-  rows.slice(1).forEach(r => {
-    const key = (r[ikey] || '').trim();
+  if (ikey < 0 || isys < 0 || ipmt < 0) {
+    log(`❗標題列必須包含：key, system, prompt（可選：temperature）。目前 headers = ${headers.join(', ')}`, 'err');
+    return PROMPT_CACHE;
+  }
+
+  let count = 0;
+  rows.slice(1).forEach((r, i) => {
+    const rawKey = r[ikey];
+    const key = norm(rawKey);
     if (!key) return;
-    PROMPT_CACHE[key] = {
-      system: (r[isys] || '').trim(),
-      prompt: (r[ipmt] || '').trim(),
-      temperature: parseFloat((r[itmp] || '').trim()) || 0.35
-    };
+
+    const system = norm(r[isys]);
+    const prompt = norm(r[ipmt]);           // 空白會被視為空
+    const temp   = parseFloat(norm(r[itmp])) || 0.35;
+
+    PROMPT_CACHE[key] = { system, prompt, temperature: temp };
+    count++;
   });
-  log(`已載入分段 Prompts（${Object.keys(PROMPT_CACHE).length} 筆）。`);
+
+  log(`✅ 已載入分段 Prompts：${count} 筆（來自第一個分頁：${SECTION_PROMPT_SHEET_NAME}）`);
   return PROMPT_CACHE;
 }
+
 
 async function getSectionPrompt(secKey, ctx, opts = {}) {
   await loadSectionPromptsFromSheet(); // 嘗試載入（快取保護）
